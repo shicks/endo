@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "allowJs": false,
+    "target": "es2020",
+    "lib": [
+      "es2020",
+      "dom",
+    ],
+    "incremental": true,
+    "noEmit": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictPropertyInitialization": true,
+    "rootDirs": ["src"],
+    "paths": {
+      "*": ["./node_modules/*"],
+    },
+  },
+}
