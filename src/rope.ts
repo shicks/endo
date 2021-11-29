@@ -12,12 +12,15 @@ interface Rope {
 }
 interface RopeCtor {
   cat(...strs: Rope[]): Rope;
-  //splice(start: number, length: number, content?: Rope): Rope;
+  splice(r: Rope, start: number, length: number, content?: Rope): Rope;
   debugString(r: Rope): string;
   find(haystack: Rope, needle: string, startAt?: number): number;
 }
 
 const Rope: RopeCtor = {
+  find,
+  splice,
+
   cat(...ropes: Rope[]): Rope {
     if (!ropes.length) return '';
     if (ropes.length === 1) return ropes[0];
@@ -30,8 +33,6 @@ const Rope: RopeCtor = {
     return n instanceof Concat ?
         `(${Rope.debugString(n.left)})(${Rope.debugString(n.right)})` : String(n);
   },
-
-  find: find,
 }
 
 export {Rope};
@@ -245,4 +246,10 @@ function find(haystack: Rope, needle: string, startIndex: number): number {
     trimTo(i - needle.length);
   }
   return -1;
+}
+
+function splice(r: Rope, start: number, length: number, insert?: Rope): Rope {
+  const left = r.substring(0, start);
+  const right = r.substring(start + length);
+  return insert ? Rope.cat(left, insert, right) : Rope.cat(left, right);
 }
