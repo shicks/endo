@@ -1,0 +1,23 @@
+{
+  "name": "endo",
+  "version": "1.0.0",
+  "description": "Browser-based VM for the 2007 ICFP contest \"Save Endo\"",
+  "main": "index.js",
+  "scripts": {
+    "test": "node_modules/esbuild/bin/esbuild --bundle --outdir=dist/test --platform=node --sourcemap=inline test/*_test.ts && node_modules/mocha/bin/mocha dist/test/*_test.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/chai": "^4.2.22",
+    "@types/dirty-chai": "^2.0.2",
+    "@types/mocha": "^9.0.0",
+    "chai": "^4.3.4",
+    "dirty-chai": "^2.0.1",
+    "esbuild": "^0.14.0",
+    "source-map-support": "^0.5.21",
+    "ts-mocha": "^8.0.0",
+    "ts-node": "^10.4.0",
+    "typescript": "^4.5.2"
+  }
+}

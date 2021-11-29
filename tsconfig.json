@@ -1,12 +1,14 @@
 {
   "compilerOptions": {
     "allowJs": false,
+    "allowSyntheticDefaultImports": true,
     "target": "es2020",
     "lib": [
       "es2020",
       "dom",
     ],
     "incremental": true,
+    "moduleResolution": "node",
     "noEmit": true,
     "noImplicitAny": true,
     "noImplicitThis": true,
@@ -15,7 +17,7 @@
     "strictNullChecks": true,
     "strictFunctionTypes": true,
     "strictPropertyInitialization": true,
-    "rootDirs": ["src"],
+    "rootDirs": ["src", "test"],
     "paths": {
       "*": ["./node_modules/*"],
     },
