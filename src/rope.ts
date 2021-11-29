@@ -8,6 +8,7 @@ interface Rope {
   substring(start: number, end?: number): Rope;
   indexOf(needle: string, start?: number): number;
   charAt(index: number): string;
+  [Symbol.iterator](): Iterator<string>;
   readonly length: number;
 }
 interface RopeCtor {
@@ -59,6 +60,18 @@ class Concat implements Rope {
 
   charAt(index: number): string {
     return this.substring(index, index + 1).toString();
+  }
+
+  * [Symbol.iterator](): Iterator<string> {
+    const stack: Rope[] = [this];
+    let node: Rope|undefined;
+    while ((node = stack.pop())) {
+      if (node instanceof Concat) {
+        stack.push(node.right, node.left);
+      } else {
+        yield* node;
+      }
+    }
   }
 
   toString() {

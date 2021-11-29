@@ -1,7 +1,7 @@
 import {expect} from './chai.js';
 import {Rope} from '../src/rope.js';
 
-describe.only('Rope', () => {
+describe('Rope', () => {
   describe('Rope.cat', () => {
     it('should return a string for short inputs', () => {
       const r = Rope.cat('abc', 'def');
@@ -21,6 +21,24 @@ describe.only('Rope', () => {
       const r = Rope.cat('a'.repeat(200), 'b'.repeat(200));
       Rope.cat(r, 'abc');
       expect(r.toString()).to.equal('a'.repeat(200) + 'b'.repeat(200));
+    });
+  });
+
+  describe('charAt', () => {
+    it('should return the correct char', () => {
+      const r = Rope.cat('a'.repeat(200), 'b'.repeat(200));
+      expect(r.charAt(0)).to.equal('a');
+      expect(r.charAt(1)).to.equal('a');
+      expect(r.charAt(199)).to.equal('a');
+      expect(r.charAt(200)).to.equal('b');
+      expect(r.charAt(201)).to.equal('b');
+      expect(r.charAt(399)).to.equal('b');
+    });
+    it('should return empty string for out-of-bounds', () => {
+      const r = Rope.cat('a'.repeat(200), 'b'.repeat(200));
+      expect(r.charAt(-1)).to.equal('');
+      expect(r.charAt(400)).to.equal('');
+      expect(r.charAt(1000)).to.equal('');
     });
   });
 
