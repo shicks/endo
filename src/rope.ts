@@ -1,61 +1,68 @@
-//import {Deque} from './deque';
-
 const LEAF_SIZE = 200;
 
-interface D {
+interface D extends Rope {
   readonly depth: number;
 }
 
-// interface IRope {
-//   substring(start: number, end?: number): Rope;
-//   indexOf(needle: string, start?: number): number;
-//   charAt(index: number): string;
-// }
-// interface IRopeCtor {
-//   of(str: string): Rope;
-//   cat(...strs: Rope[]): Rope;
-//   splice(start: number, length: number, content?: Rope): Rope;
-// }
+interface Rope {
+  substring(start: number, end?: number): Rope;
+  indexOf(needle: string, start?: number): number;
+  charAt(index: number): string;
+  readonly length: number;
+}
+interface RopeCtor {
+  cat(...strs: Rope[]): Rope;
+  //splice(start: number, length: number, content?: Rope): Rope;
+  debugString(r: Rope): string;
+  find(haystack: Rope, needle: string, startAt?: number): number;
+}
 
-export class Rope {
-  private constructor(private readonly node: Node) {}
+const Rope: RopeCtor = {
+  cat(...ropes: Rope[]): Rope {
+    if (!ropes.length) return '';
+    if (ropes.length === 1) return ropes[0];
+    if (ropes.length === 2) return append(ropes[0], ropes[1]);
+    // Any more than two: build with strong balance
+    return rebalance(ropes.reverse());
+  },
 
-  append(right: Rope|string) {
-    if (!this.node) return right instanceof Rope ? right : new Rope(right);
-    const rightNode = right instanceof Rope ? right.node : right;
-    if (!rightNode) return this;
-    return new Rope(append(this.node, rightNode));
+  debugString(n: Rope): string {
+    return n instanceof Concat ?
+        `(${Rope.debugString(n.left)})(${Rope.debugString(n.right)})` : String(n);
+  },
+
+  find: find,
+}
+
+export {Rope};
+
+class Concat implements Rope {
+  readonly depth: number;
+  constructor(readonly left: Rope, readonly right: Rope,
+              readonly length = left.length + right.length) {
+    this.depth = Math.max((left as D).depth || 0, (right as D).depth || 0) + 1;
   }
 
-  substring(start: number, end?: number): Rope {
-    const n = subrope(this.node, start, end);
-    if (n === this.node) return this;
-    return new Rope(n);
+  substring(start: number, end = this.length): Rope {
+    if (start <= 0 && this.length <= end) return this;
+    const a = this.left.length;
+    if (start >= a) return this.right.substring(start - a, end - a);
+    if (end <= a) return this.left.substring(start, end);
+    return concat(this.left.substring(start, a),
+                  this.right.substring(0, end - a));
   }
 
   indexOf(needle: string, startIndex = 0): number {
-    return find(this.node, needle, startIndex);
+    return find(this, needle, startIndex);
+  }
+
+  charAt(index: number): string {
+    return this.substring(index, index + 1).toString();
   }
 
   toString() {
-    return toString(this.node);
+    return toString(this);
   }
-
-  get length() {
-    return this.node.length;
-  }
-
-  static of(str: string): Rope {
-    return new Rope(str);
-  }
-
-  debugString() {
-    return debugString(this.node);
-  }
-}
-
-function debugString(n: Node): string {
-  return isLeaf(n) ? n : `(${debugString(n.left)})(${debugString(n.right)})`;
 }
 
 const fibArray = [1, 2];
@@ -79,43 +86,36 @@ function ifib(n: number): number {
 }
 
 declare const BALANCED: unique symbol;
-type Balanced = string | (Concat & {[BALANCED]: true});
-interface Concat {
-  readonly depth: number;
-  readonly length: number;
-  readonly left: Node;
-  readonly right: Node;
-}
-type Node = string|Concat;
+type Unbalanced = Concat & {[BALANCED]: false};
 
-function isLeaf(n: Node): n is string {
+function isLeaf(n: Rope): n is string {
   return typeof n === 'string';
 }
 
-function toString(root: Node): string {
+function toString(root: Rope): string {
   if (isLeaf(root)) return root;
   let str = '';
-  const stack: Node[] = [root];
-  let node: Node|undefined;
+  const stack: Rope[] = [root];
+  let node: Rope|undefined;
   while ((node = stack.pop())) {
-    if (isLeaf(node)) {
-      str += node;
-    } else {
+    if (node instanceof Concat) {
       stack.push(node.right, node.left);
+    } else {
+      str += node;
     }
   }
   return str;
 }
 
-function concat(left: Node, right: Node): Node {
+// this version has fewer checks for balance
+function concat(left: Rope, right: Rope): Rope {
   const length = left.length + right.length;
   if (length < LEAF_SIZE) return left.toString() + right.toString();
-  const depth = Math.max((left as D).depth || 0, (right as D).depth || 0) + 1;
-  return {depth, length, left, right};
+  return new Concat(left, right, length);
 }
 
 // basically same as concat but will maybe rebalance...
-function append(left: Node, right: Node): Node {
+function append(left: Rope, right: Rope): Rope {
   if (!right.length) return left;
   if (!left.length) return right;
   if (left.length + right.length < LEAF_SIZE) {
@@ -124,27 +124,23 @@ function append(left: Node, right: Node): Node {
   return maybeRebalance(concat(left, right));
 }
 
-function isBalanced(n: Node): n is Balanced {
-  if (typeof n === 'string') return true;
-  return n.length >= fib(n.depth) * LEAF_SIZE;
+function isUnbalanced(n: Rope): n is Unbalanced {
+  return n instanceof Concat && n.length < fib(n.depth) * LEAF_SIZE;
 }
 
 
-
-function maybeRebalance(root: Node): Node {
-  //console.log(`maybe rebalancing`, root);
-  if (typeof root === 'string') return root;
+function maybeRebalance(root: Rope): Rope {
+  if (!(root instanceof Concat)) return root;
   if (root.length >= fib(root.depth - 2) * LEAF_SIZE) return root;
-  return rebalance(root);
+  return rebalance([root]);
 }
 
-function rebalance(root: Node): Node {
+function rebalance(stack: Rope[]): Rope {
   // seq is decreasing in slot, chunks are in correct order
-  const seq: Array<readonly [slot: number, chunk: Node]> = [];
-  const stack: Node[] = [root];
-  let node: Node|undefined;
+  const seq: Array<readonly [slot: number, chunk: Rope]> = [];
+  let node: Rope|undefined;
   while (node = stack.pop()) {
-    if (!isBalanced(node)) {
+    if (isUnbalanced(node)) {
       stack.push(node.right, node.left);
     } else {
       // n is a balanced node
@@ -166,20 +162,8 @@ function rebalance(root: Node): Node {
   return node;
 }
 
-function subrope(n: Node, start: number, end = n.length): Node {
-  if (start <= 0 && n.length <= end) return n;
-  if (isLeaf(n)) {
-    return n.substring(Math.max(start, 0), Math.min(end, n.length));
-  }
-  const a = n.left.length;
-  if (start >= a) return subrope(n.right, start - a, end - a);
-  if (end <= a) return subrope(n.left, start, end);
-  return concat(subrope(n.left, start, a), subrope(n.right, 0, end - a));
-}
-
-function find(haystack: Node, needle: string, startIndex: number): number {
+function find(haystack: Rope, needle: string, startIndex: number): number {
   if (needle.length === 0) return startIndex;
-//  console.log(`\n\nFIND [${needle}] in [${debugString(haystack)}] from ${startIndex}`);
   const charTable = new Map<string, number>();
   const offsetTable: number[] = [];
   // TODO - consider caching these?!?
@@ -187,7 +171,6 @@ function find(haystack: Node, needle: string, startIndex: number): number {
   for (let i = 0; i < needle.length - 1; i++) {
     charTable.set(needle[i], needle.length - 1 - i);
   }
-//console.log(`chartable: ${[...charTable].map(([c,i])=>`${c}: ${i}`).join(', ')}`);
   // Make offset table
   {
     let lastPrefixPos = needle.length;
@@ -210,20 +193,18 @@ function find(haystack: Node, needle: string, startIndex: number): number {
       }
       offsetTable[slen] = needle.length - 1 - i + slen;
     }
-//console.log(`offsettable: ${offsetTable.join(', ')}`);
   }
   // Now search
-  const stack: Node[] = [haystack];
+  const stack: Rope[] = [haystack];
   let cursor = 0;
   function charAt(index: number) {
-//const orig=index;
     index -= cursor;
     let i = stack.length - 1;
     while (stack[i].length <= index) {
       index -= stack[i--].length;
     }
     let n = stack[i];
-    while (!isLeaf(n)) {
+    while (n instanceof Concat) {
       const a = n.left.length;
       if (index < a) {
         n = n.left;
@@ -232,10 +213,9 @@ function find(haystack: Node, needle: string, startIndex: number): number {
         n = n.right;
       }
     }
-    return n[index];
+    return (n as string)[index];
   }
   function trimTo(index: number) {
-//    console.log(`trimTo(${index}): c=${cursor} stk=${stack.map(debugString).join(', ')}`);
     index -= cursor;
     let i = stack.length - 1;
     while (i >= 0 && (stack[i].length < index || !isLeaf(stack[i]))) {
@@ -251,24 +231,18 @@ function find(haystack: Node, needle: string, startIndex: number): number {
       cursor += len;
       i--;
     }
-//    console.log(` => c=${cursor} stk=${stack.map(debugString).join(', ')}`);
   }
   if (startIndex) trimTo(startIndex);
   for (let i = startIndex + needle.length - 1, j; i < haystack.length;) {
-//console.log(`i=${i}`);
     let c!: string;
     for (j = needle.length - 1; needle[j] === (c = charAt(i)); --i, --j) {
-//console.log(`j=${j}, i=${i}, c=${c}`);
       if (j == 0) {
-//console.log(`found ${i}`);
         return i;
       }
     }
-//console.log(`skip: offset=${offsetTable[needle.length - 1 - j]} char[${c}]=${charTable.get(c) ?? needle.length}`);
     i += Math.max(offsetTable[needle.length - 1 - j],
                   charTable.get(c) ?? needle.length);
     trimTo(i - needle.length);
   }
-//console.log(`could not find`);
   return -1;
 }

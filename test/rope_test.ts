@@ -2,33 +2,25 @@ import {expect} from './chai.js';
 import {Rope} from '../src/rope.js';
 
 describe.only('Rope', () => {
-  describe('Rope.of', () => {
-    it('should accept a string', () => {
-      expect(Rope.of('abcdef').toString()).to.equal('abcdef');
+  describe('Rope.cat', () => {
+    it('should return a string for short inputs', () => {
+      const r = Rope.cat('abc', 'def');
+      expect(r).to.equal('abcdef');
     });
-  });
-
-  describe('append', () => {
-    it('should accept a raw string', () => {
-      const r = Rope.of('abc');
-      expect(r.append('def').toString()).to.equal('abcdef');
+    it('should return a rope for long inputs', () => {
+      const r = Rope.cat('a'.repeat(200), 'b'.repeat(200));
+      expect(r).not.to.be.a('string');
+      expect(r.toString()).to.equal('a'.repeat(200) + 'b'.repeat(200));
     });
-    it('should accept a rope', () => {
-      const left = Rope.of('xy');
-      const right = Rope.of('zzy');
-      expect(left.append(right).toString()).to.equal('xyzzy');
-    });
-    it('should return `this` if arg is empty', () => {
-      const r = Rope.of('xyzzy');
-      expect(r.append('')).to.equal(r);
-      expect(r.append(Rope.of(''))).to.equal(r);
+    it('should return the non-empty arg exactly', () => {
+      const r = Rope.cat('a'.repeat(200), 'b'.repeat(200));
+      expect(Rope.cat(r, '')).to.equal(r);
+      expect(Rope.cat('', r)).to.equal(r);
     });
     it('should not modify any arguments', () => {
-      const left = Rope.of('xyz');
-      const right = Rope.of('abc');
-      left.append(right);
-      expect(left.toString()).to.equal('xyz');
-      expect(right.toString()).to.equal('abc');
+      const r = Rope.cat('a'.repeat(200), 'b'.repeat(200));
+      Rope.cat(r, 'abc');
+      expect(r.toString()).to.equal('a'.repeat(200) + 'b'.repeat(200));
     });
   });
 
@@ -48,11 +40,11 @@ describe.only('Rope', () => {
 });
 
 function loadTest(lengths: number[]) {
-  let r = Rope.of('');
+  let r: Rope = '';
   let s = '';
   for (let i = 0; i < lengths.length; i++) {
     const chars = String.fromCharCode('A'.charCodeAt(0) + i).repeat(lengths[i]);
-    r = r.append(chars);
+    r = Rope.cat(r, chars);
     s = s + chars;
     expect(r.toString()).to.equal(s);
     for (let j = 0; j < s.length; j = Math.ceil(j * 1.5) + 1) {
