@@ -1,0 +1,75 @@
+Rope with a built-in cursor
+ - cursor is stack and position
+ - easily split at cursor
+ - find built into cursor as well
+
+Can we build sourcemaps into the rope?
+ - avoid aggregation -> pure tree
+
+Str {
+  str: string
+  origin: number
+  lvl?: number  // how many escapes/unescapes applied?
+  depth: 0
+  length: number
+}
+App {
+  left: Rope
+  right: Rope
+  depth: number
+  length: number
+  origin: number??
+}
+
+Bases = Rope // (may include '(' or ')' for PItem)
+
+PItem = Bases | Skip | Search
+Skip = {skip: Num, seq: Rope}
+Search = {search: Rope, seq: Rope}
+
+TItem = Bases | Len | Sub
+Len = {len: Num, seq: Rope}
+Sub = {lvl: Num, grp: Num, seq: Rope}
+
+Rna = {origin: number, bases: Rope}
+Num = {str: Rope, num: number}
+
+
+Main DNA starts at 0, prepend starts at negative
+
+Balance only by tree height
+ - if left.depth > right.depth + 2 then rebalance?
+
+      o            o
+     / \          / \
+    o   c   =>   a   o
+   / \              / \
+  a   b            b   c
+
+ - if b is the long one, this is harder
+
+       o              o
+      / \            / \
+     o   d          o   o
+    / \       =>   /\   /\
+   a   o          a  b c  d
+      / \
+     b   c
+
+ - this may or may not actually get the job done
+
+Possible performance problem:
+ - splitting a rope w/ lvl != 0
+ - linear in split point to compute new origin, since
+   need to count # of P's or IC's in the string
+ - doesn't make sense to keep track of it separately...?
+ - could just split escaped substrings eagerly into separate chunks,
+   but this seems expensive, and will never rejoin.
+
+Another option: just store the whole thing as numbers?
+ - encode ICFP as low 2 bits of origin...
+ - escaped-level is ...? do we encode that as well?
+ - 32 bits: 2 for base, 6 for level, leaves 24 for origin
+   - fits 16 MB, which might be enough w/ sign bit (or ignore
+     sign and just renormalize on display)
+   - could put escape level at high bits and use sign extension: +/-32?

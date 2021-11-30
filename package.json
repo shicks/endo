@@ -4,7 +4,8 @@
   "description": "Browser-based VM for the 2007 ICFP contest \"Save Endo\"",
   "main": "index.js",
   "scripts": {
-    "test": "node_modules/esbuild/bin/esbuild --bundle --outdir=dist/test --platform=node --sourcemap=inline test/*_test.ts && node_modules/mocha/bin/mocha dist/test/*_test.js"
+    "test": "node_modules/esbuild/bin/esbuild --bundle --outdir=dist/test --platform=node --sourcemap=inline test/*_test.ts && node_modules/mocha/bin/mocha dist/test/*_test.js",
+    "main": "node_modules/esbuild/bin/esbuild --bundle --outfile=dist/index.js --platform=node src/index.ts && node dist/index.js"
   },
   "author": "",
   "license": "ISC",
