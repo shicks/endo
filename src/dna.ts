@@ -12,7 +12,7 @@ export class Dna {
   }
 
   cursor(index: number = 0): ICursor {
-    return new Cursor(this.node, index);
+    return new Cursor([], this.node, index, index, this.node.length);
   }
 
   toString(): string {
@@ -35,6 +35,24 @@ export class Dna {
         stack.push(top.right, top.left);
       }
     }
+  }
+
+  iterate(emit: Emit[]): Dna|undefined {
+    const c = this.cursor();
+    const pat = c.pattern(emit);
+    if (!pat) return undefined;
+    const tpl = c.template(emit);
+    if (!tpl) return undefined;
+    return new Dna(c.matchReplace(pat, tpl));
+  }
+
+  execute(): Emit[] {
+    const emit: Emit[] = [];
+    let dna: Dna|undefined = this;
+    while (dna) {
+      dna = dna.iterate(emit);
+    }
+    return emit;
   }
 
   static join(...nodes: Node[]): Dna {
@@ -68,9 +86,10 @@ const INV_BASES = new Map([...BASES].map((v, i) => [v, i] as const));
 interface ICursor {
   readonly index: number;
   readonly length: number;
+  // clone(): ICursor;
   seek(index: number): void;
   skip(delta: number): void;
-  find(needle: Dna): boolean;
+  find(needle: Node): boolean;
   next(): number|undefined;
   nextStr(): string;
   prev(): number|undefined;
@@ -78,10 +97,11 @@ interface ICursor {
   suffix(): Node;
   peek(): string;
   peek2(): string;
-  patternItem(): PItem|Emit|undefined;
-  pattern(emits: Emit[]): PItem[];
-  templateItem(): TItem|Emit|undefined;
-  template(emits: Emit[]): TItem[];
+  patternItem(): PItem|Control;
+  pattern(emits: Emit[]): PItem[]|undefined;
+  templateItem(): TItem|Control;
+  template(emits: Emit[]): TItem[]|undefined;
+  matchReplace(pat: PItem[], tpl: TItem[]): Node;
   atEnd(): boolean;
   slice(count: number): Node|undefined;  
 }
@@ -90,7 +110,7 @@ class Cursor implements ICursor {
   // Index within the entire string.
   index: number;
   // Stack of parents
-  stack: Array<readonly [node: App, branch: number]> = [];
+  stack: Array<readonly [node: App, branch: number]>;
   // Current node
   cur: Node
   // Index within the current leaf.
@@ -98,11 +118,19 @@ class Cursor implements ICursor {
   // Total length
   length: number;
 
-  constructor(node: Node, index: number = 0) {
-    this.length = node.length;
-    this.index = this.pos = index;
-    this.cur = node;
+  constructor(stack: Array<readonly [App, number]>, cur: Node,
+              index: number, pos: number, length: number) {
+    this.stack = stack;
+    this.cur = cur;
+    this.index = index;
+    this.pos = pos;
+    this.length = length;
   }
+
+  // clone(): Cursor {
+  //   return new Cursor([...this.stack], this.cur,
+  //                     this.index, this.pos, this.length);
+  // }
 
   descend() {
     while (!isLeaf(this.cur)) {
@@ -143,8 +171,33 @@ class Cursor implements ICursor {
     this.ascend();
   }
 
-  find(_needle: Dna): boolean {
-    throw 'not implemented';
+  // return 0..3
+  charAt(i: number): number {
+    this.seek(i);
+    this.descend();
+    const val = isLeaf(this.cur) ? this.cur[this.pos] : undefined;
+    return val != null ? val & 3 : -1;
+  }
+  find(needle: Node): boolean {
+    const startIndex = this.index; // to get back if we don't find it
+    const needleNums = Array.from(new Dna(needle), x => x & 3);
+    const needleLen = needleNums.length;
+    const charTable = boyerMooreCharTable(needleNums);
+    const offsetTable = boyerMooreOffsetTable(needleNums);
+    for (let i = this.index + needleLen - 1, j; i < this.length;) {
+      let c!: number;
+      for (j = needleLen - 1;
+           needleNums[j] === (c = this.charAt(i));
+           --i, --j) {
+        if (j === 0) {
+          this.seek(i + needleLen); // seek past end of needle
+          return true;
+        }
+      }
+      i += Math.max(offsetTable[needleLen - 1 - j], charTable[c]);
+    }
+    this.seek(startIndex);
+    return false;
   }
 
   next(): number|undefined {
@@ -220,7 +273,7 @@ class Cursor implements ICursor {
     return '';
   }
 
-  patternItem(): PItem|Emit|undefined {
+  patternItem(): PItem|Control {
     const first = this.peek();
     if (first === 'I') {
       const second = this.peek2();
@@ -231,7 +284,7 @@ class Cursor implements ICursor {
           case 'I': return {type: 'emit', op, rna: this.slice(7)!};
           case 'C': case 'F': return {type: 'close', op};
           case 'P': return {type: 'open', op};
-          default: return undefined;
+          default: return FINISH;
         }
       } else if (second === 'C') {
         // start a run of escaped chars
@@ -244,34 +297,46 @@ class Cursor implements ICursor {
         // two-char op: IP (skip)
         const op = this.slice(2)!;
         const count = this.nat();
+        if (!count) return FINISH;
         return {type: 'skip', op, count};
       } else {
         this.next(); // push us off the end
+        return FINISH;
       }
     } else if (first) {
       // start a run of escaped chars
       return this.bases();
     }
-    return undefined;
+    return FINISH;
   }
 
-  pattern(emits: Emit[]): PItem[] {
+  pattern(emits: Emit[]): PItem[]|undefined {
     let lvl = 0;
     const pattern: PItem[] = [];
-    let item: PItem|Emit|undefined;
-    while ((item = this.patternItem()) && (lvl > 0 || item.type !== 'close')) {
-      if (item.type === 'open') lvl++;
-      if (item.type === 'close') lvl--;
-      if (item.type === 'emit') {
-        emits.push(item);
-      } else {
-        pattern.push(item);
+    for (;;) {
+      const item = this.patternItem();
+      switch (item.type) {
+        case 'finish':
+          return undefined;
+        case 'open':
+          lvl++;
+          break;
+        case 'close':
+          lvl--;
+          if (lvl < 0) return pattern;
+          break;
+        case 'emit':
+          emits.push(item);
+          break;
+        case 'done':
+          throw new Error('impossible done pattern');
+        default:
+          pattern.push(item);
       }
     }
-    return pattern;
   }
 
-  templateItem(): TItem|Emit|undefined {
+  templateItem(): TItem|Control {
     const first = this.peek();
     if (first === 'I') {
       const second = this.peek2();
@@ -280,21 +345,24 @@ class Cursor implements ICursor {
         const op = this.slice(3)!;
         switch (indexStr(op, 2)) {
           case 'I': return {type: 'emit', op, rna: this.slice(7)!};
-          case 'C': case 'F': // done
-            this.skip(3);
-            return undefined;
-          case 'P': return {type: 'len', op, group: this.nat()};
-          default: return undefined;
+          case 'C': case 'F': return {type: 'done'};
+          case 'P': 
+            const group = this.nat();
+            if (!group) return FINISH;
+            return {type: 'len', op, group};
+          default: return FINISH;
         }
       } else if (second === 'C') {
         // start a run of escaped chars
         return this.bases();
       } else if (second === 'F' || second === 'P') {
-        // two-char op: IF (search)
+        // two-char op: IF (group reference)
         const op = this.slice(2)!;
-        const group = this.nat();
         const level = this.nat();
-        return {type: 'ref', op, group, level};
+        if (!level) return FINISH;
+        const group = this.nat();
+        if (!group) return FINISH;
+        return {type: 'ref', op, level, group};
       } else {
         this.next(); // 2nd is nothing, only 1 left: push us off the end
       }
@@ -302,20 +370,84 @@ class Cursor implements ICursor {
       // start a run of escaped chars
       return this.bases();
     }
-    return undefined;
+    return FINISH;
   }
 
-  template(emits: Emit[]): TItem[] {
+  template(emits: Emit[]): TItem[]|undefined {
     const template: TItem[] = [];
-    let item: TItem|Emit|undefined;
-    while ((item = this.templateItem())) {
-      if (item.type === 'emit') {
-        emits.push(item);
-      } else {
-        template.push(item);
+    for (;;) {
+      const item = this.templateItem();
+      switch (item.type) {
+        case 'finish':
+          return undefined;
+        case 'done':
+          return template;
+        case 'emit':
+          emits.push(item);
+          break;
+        default:
+          template.push(item);
       }
     }
-    return template;
+  }
+
+  matchBases(bases: Node): boolean {
+    const stack: Node[] = [bases];
+    let top: Node|undefined;
+    while ((top = stack.pop())) {
+      if (isLeaf(top)) {
+        for (const n of top) {
+          if (!this.atEnd() && (n & 3) !== (this.next()! & 3)) return false;
+        }
+      } else {
+        stack.push(top.right, top.left);
+      }
+    }
+    return true;
+  }
+
+  matchReplace(pat: PItem[], t: TItem[]): Node {
+    const startIndex = this.index; // save in case not found
+    const env: Node[] = [];
+    const c: number[] = [];
+    // Match the pattern
+    for (const p of pat) {
+      switch (p.type) {
+        case 'bases':
+          if (!this.matchBases(p.bases)) {
+            this.seek(startIndex);
+            return this.suffix();
+          }
+          break;
+        case 'open':
+          c.push(this.index);
+          break;
+        case 'close':
+          if (!c.length) throw 'impossible ) without (';
+          const len = this.index - c.pop()!;
+          this.skip(-len);
+          env.push(this.slice(len)!);
+          break;
+        case 'skip':
+          this.skip(p.count.val);
+          if (this.index > this.length) {
+            this.seek(startIndex);
+            return this.suffix();
+          }
+          break;
+        case 'search':
+          if (!this.find(p.query)) {
+            this.seek(startIndex);
+            return this.suffix();
+          }
+          break;
+        default:
+          throw new Error(`impossible pattern: ${p!.type}`);
+      }
+    }
+    // Replace the template
+    const repl = replace(t, env);
+    return repl ? join(repl, this.suffix()) : this.suffix();
   }
 
   atEnd(): boolean {
@@ -361,7 +493,7 @@ class Cursor implements ICursor {
     return Int32Array.from(bases);
   }
 
-  nat(): Num {
+  nat(): Num|undefined {
     let node!: Node|undefined;
     // Read until we hit a P, or the end
     //  - preserve arrays...
@@ -389,24 +521,68 @@ class Cursor implements ICursor {
     while (bits.length) {
       val = val << 1 | bits.pop()!;
     }
-    if (!node) throw new Error(`Expected nat`);
+    if (!node) return undefined;
     return {node, val};
   }
 }
 
+function replace(tpl: TItem[], env: Node[]): Node|undefined {
+  let node!: Node|undefined;
+  function push(n: Node) {
+    node = node ? join(node, n) : n;
+  }
+  for (const t of tpl) {
+    switch (t.type) {
+      case 'bases':
+        push(t.bases);
+        break;
+      case 'len':
+        push(asNat(env[t.group.val]?.length || 0, addr(t.op)));
+        break;
+      case 'ref':
+        const group = env[t.group.val];
+        if (group) push(protect(group, t.level.val));
+        break;
+      default:
+        throw new Error(`impossible template ${t!.type}`);
+    }
+  }
+  return node;
+}
+
+function addr(node: Node): number {
+  while (!isLeaf(node)) node = node.left;
+  return (node[0] & ADDR_MASK) >>> 2;
+}
+
+function asNat(n: number, addr: number): Node {
+  const mask = addr << 2 | NAN_LVL << LVL_SHIFT;
+  const nums: number[] = [];
+  while (n) {
+    nums.push(((n & 1) ? 1 : 0) | mask);
+    n >>>= 1;
+  }
+  nums.push(3 | mask);
+  return Int32Array.from(nums);
+}
+
+const NAN_LVL = -32;
 const MAX_LVL = 31;
 const LVL_SHIFT = 26;
 const ADDR_MASK = 0x03FF_FFFC;
-const ESCAPES: number[][] = [[1], [2], [3], [0, 1]];
+const ESCAPES: number[][] = [[0], [1], [2], [3], [0, 1]];
 function getEscape(index: number): number[] {
-  while (index < ESCAPES.length) {
-    ESCAPES.push(ESCAPES[ESCAPES.length - 1].flatMap(n => ESCAPES[n]));
+  while (index >= ESCAPES.length) {
+    ESCAPES.push(ESCAPES[ESCAPES.length - 1].flatMap(n => ESCAPES[n + 1]));
   }
   return ESCAPES[index];
 }
 
-function esc(node: Node, lvl: number): Node {
-  if (!isLeaf(node)) return join(esc(node.left, lvl), esc(node.right, lvl));
+function protect(node: Node, lvl: number): Node {
+  if (!lvl) return node;
+  if (!isLeaf(node)) {
+    return join(protect(node.left, lvl), protect(node.right, lvl));
+  }
   const nums: number[] = [];
   for (const n of node) {
     let thisLvl = n >> LVL_SHIFT;
@@ -418,7 +594,6 @@ function esc(node: Node, lvl: number): Node {
   }
   return Int32Array.from(nums);
 }
-const [] = [esc];
 
 function indexStr(node: Node, index: number): string {
   while (!isLeaf(node)) {
@@ -465,10 +640,13 @@ export interface Emit {
 }
 type PItem = Bases|Group|Skip|Search;
 type TItem = Bases|Len|Ref;
+type Control = Emit|{type: 'done'|'finish'};
 interface Num {
   node: Node;
   val: number;
 }
+
+const FINISH = {type: 'finish'} as Control;
 
 function isLeaf(node: Node): node is Str {
   return node instanceof Int32Array;
@@ -519,6 +697,41 @@ function join(left: Node, right: Node): App {
     depth: Math.max(dl, dr) + 1,
     length: left.length + right.length,
   };
+}
+
+// needle is an array of [0..3], return is a 4-element array
+function boyerMooreCharTable(needle: number[]): number[] {
+  const len = needle.length;
+  const table = [len, len, len, len];
+  for (let i = 0; i < needle.length - 1; i++) {
+    table[needle[i]] = len - 1 - i;
+  }
+  return table;
+}
+function boyerMooreOffsetTable(needle: number[]): number[] {
+  const len = needle.length;
+  const table: number[] = [];
+  let lastPrefixPos = len;
+  for (let i = len; i > 0; i--) {
+    let isPrefix = true;
+    for (let ii = i, j = 0; ii < needle.length; ii++, j++) {
+      if (needle[ii] !== needle[j]) {
+        isPrefix = false;
+        break;
+      }
+    }
+    if (isPrefix) lastPrefixPos = i;
+    table[len - i] = lastPrefixPos - i + len;
+  }
+  for (let i = 0; i < len - 1; i++) {
+    let slen = 0;
+    for (let ii = i, j = len - 1;
+         ii >= 0 && needle[ii] === needle[j]; ii--, j--) {
+      slen++;
+    }
+    table[slen] = len - 1 - i + slen;
+  }
+  return table;
 }
 
 export {ICursor as Cursor};

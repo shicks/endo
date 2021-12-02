@@ -4,7 +4,7 @@ import {Dna, Emit} from '../src/dna.js';
 function i32(base: 'I'|'C'|'F'|'P', source: number, level = 0) {
   return 'ICFP'.indexOf(base) | source << 2 | level << 26;
 }
-function seq(bases: string, start: number, level = 0) {
+function seq(bases: string, start: number, level = 0): Int32Array {
   const nums: number[] = [];
   for (let i = 0; i < bases.length; i++) {
     nums.push(i32(bases[i] as any, start + i, level));
@@ -86,6 +86,40 @@ describe('Dna', () => {
         expect(c.index).to.equal(7);
       });
     });
+   
+    describe('find (simple leaf)', () => {
+      testFind();
+    });
+    describe('find (fragmented rope)', () => {
+      testFind([2, 1, 4, 2, 3, 2, 1, 1]);
+    });
+    function testFind(frags?: number[]) {
+      it('seeks to end of match and returns true', () => {
+        const d = Dna.of(unspace('IIPI PICP IICI CIIF'));
+        const c = (frags ? fragment(d, frags) : d).cursor(0);
+        expect(c.find(seq('PIP', 4))).to.be.true();
+        expect(c.index).to.equal(5);
+      });
+      it('finds first match', () => {
+        const d = Dna.of(unspace('IIPI PICP IICI CIIF'));
+        const c = (frags ? fragment(d, frags) : d).cursor(1);
+        expect(c.find(seq('II', 4))).to.be.true();
+        expect(c.index).to.equal(10);
+      });
+      it('does not find earlier matches', () => {
+        const d = Dna.of(unspace('IIPI PICP IICI CIIF'));
+        const c = (frags ? fragment(d, frags) : d).cursor(1);
+        expect(c.find(seq('II', 4))).to.be.true();
+        expect(c.index).to.equal(10);
+      });
+      it('stays put and returns false if no match', () => {
+        const d = Dna.of(unspace('IIPI PICP IICI CIIF'));
+        const c = (frags ? fragment(d, frags) : d).cursor(5);
+        expect(c.find(seq('PICP', 0))).to.be.false();
+        expect(c.index).to.equal(5);
+      });
+    }
+
   });
 
   describe('pattern()', () => {
@@ -99,6 +133,16 @@ describe('Dna', () => {
       expect(c.atEnd()).to.be.true();
       expect(emit).to.eql([]);
     });
+    it('should stop before end', () => {
+      const c = Dna.of('CIICIC').cursor();
+      const emit: Emit[] = [];
+      expect(c.pattern(emit)).to.eql([
+        {type: 'bases', bases: seq('I', 0, -1)},
+      ]);
+      expect(c.index).to.equal(4);
+      expect(c.atEnd()).to.be.false();
+      expect(emit).to.eql([]);
+    });
     it('should parse a simple skip', () => {
       const c = Dna.of('IPICPIIF').cursor();
       const emit: Emit[] = [];
@@ -106,6 +150,19 @@ describe('Dna', () => {
         {type: 'skip', op: seq('IP', 0), count: {node: seq('ICP', 2), val: 2}},
       ]);
       expect(c.index).to.equal(8);
+      expect(c.atEnd()).to.be.true();
+      expect(emit).to.eql([]);
+    });
+    it('should parse a simple search', () => {
+      const c = Dna.of('IFCICPICFCPIIC').cursor();
+      const emit: Emit[] = [];
+      expect(c.pattern(emit)).to.eql([
+        {type: 'search', op: seq('IFC', 0),
+         query: Int32Array.of(...seq('P', 3, -1),     // NOTE: seq broken by P,
+                              ...seq('FP', 5, -1),    // which jumps index by 2
+                              ...seq('CIF', 8, -1))},
+      ]);
+      expect(c.index).to.equal(14);
       expect(c.atEnd()).to.be.true();
       expect(emit).to.eql([]);
     });
@@ -122,19 +179,106 @@ describe('Dna', () => {
       expect(c.atEnd()).to.be.true();
       expect(emit).to.eql([]);
     });
+    it('should emit RNA', () => {
+      const c = Dna.of('CIIIPIIFIIPIIC').cursor();
+      const emit: Emit[] = [];
+      expect(c.pattern(emit)).to.eql([
+        {type: 'bases', bases: seq('I', 0, -1)},
+      ]);
+      expect(c.index).to.equal(14);
+      expect(c.atEnd()).to.be.true();
+      expect(emit).to.eql([
+        {type: 'emit', op: seq('III', 1), rna: seq('PIIFIIP', 4)},
+      ]);
+    });
   });
 
-  // describe('pattern()', () => {
-  //   const d = new DnaProcessor('');
-  //   it('should parse a base', () => {
-  //     const r = new Reader('CIIC')
-  //     expect(d.pattern(r)).to.eql(['I']);
-  //     expect(r.slice()).to.equal('');
-  //   });
-  //   it('should parse a skip', () => {
-  //     const r = new Reader('IIPIPICPIICICIIF');
-  //     expect(d.pattern(r)).to.eql(['(', 2, ')', 'P']);
-  //     expect(r.slice()).to.equal('');
-  //   });
-  // });
+  describe('template()', () => {
+    it('should parse a simple base', () => {
+      const c = Dna.of('CIIC').cursor();
+      const emit: Emit[] = [];
+      expect(c.template(emit)).to.eql([
+        {type: 'bases', bases: seq('I', 0, -1)},
+      ]);
+      expect(c.index).to.equal(4);
+      expect(c.atEnd()).to.be.true();
+      expect(emit).to.eql([]);
+    });
+    it('should stop before end', () => {
+      const c = Dna.of('CIICIC').cursor();
+      const emit: Emit[] = [];
+      expect(c.template(emit)).to.eql([
+        {type: 'bases', bases: seq('I', 0, -1)},
+      ]);
+      expect(c.index).to.equal(4);
+      expect(c.atEnd()).to.be.false();
+      expect(emit).to.eql([]);
+    });
+    it('should parse a simple length', () => {
+      const c = Dna.of('IIPICPIIF').cursor();
+      const emit: Emit[] = [];
+      expect(c.template(emit)).to.eql([
+        {type: 'len', op: seq('IIP', 0), group: {node: seq('ICP', 3), val: 2}},
+      ]);
+      expect(c.index).to.equal(9);
+      expect(c.atEnd()).to.be.true();
+      expect(emit).to.eql([]);
+    });
+    it('should parse a simple group reference', () => {
+      const c = Dna.of('IFIFCPICFCPIIC').cursor();
+      const emit: Emit[] = [];
+      expect(c.template(emit)).to.eql([
+        {type: 'ref', op: seq('IF', 0),
+         level: {node: seq('IFCP', 2), val: 4},
+         group: {node: seq('ICFCP', 6), val: 10}},
+      ]);
+      expect(c.index).to.equal(14);
+      expect(c.atEnd()).to.be.true();
+      expect(emit).to.eql([]);
+    });
+    it('should parse a more complex query', () => {
+      const c = Dna.of('IIPICPICIIF').cursor();
+      const emit: Emit[] = [];
+      expect(c.template(emit)).to.eql([
+        {type: 'len', op: seq('IIP', 0), group: {node: seq('ICP', 3), val: 2}},
+        {type: 'bases', bases: seq('P', 6, -1)},
+      ]);
+      expect(c.index).to.equal(11);
+      expect(c.atEnd()).to.be.true();
+      expect(emit).to.eql([]);
+    });
+    it('should emit RNA', () => {
+      const c = Dna.of('CIIIPIIFIIPIIC').cursor();
+      const emit: Emit[] = [];
+      expect(c.template(emit)).to.eql([
+        {type: 'bases', bases: seq('I', 0, -1)},
+      ]);
+      expect(c.index).to.equal(14);
+      expect(c.atEnd()).to.be.true();
+      expect(emit).to.eql([
+        {type: 'emit', op: seq('III', 1), rna: seq('PIIFIIP', 4)},
+      ]);
+    });
+  });
+
+  describe('iterate', () => {
+    it('should handle example #1', () => {
+      const d = Dna.of('IIPIPICPIICICIIFICCIFPPIICCFPC');
+      const emit: Emit[] = [];
+      expect(d.iterate(emit).toString()).to.equal('PICFC');
+      expect(emit).to.eql([]);
+    });
+    it('should handle example #2', () => {
+      const d = Dna.of('IIPIPICPIICICIIFICCIFCCCPPIICCFPC');
+      const emit: Emit[] = [];
+      expect(d.iterate(emit).toString()).to.equal('PIICCFCFFPC');
+      expect(emit).to.eql([]);
+    });
+    it('should handle example #3', () => {
+      const d = Dna.of('IIPIPIICPIICIICCIICFCFC');
+      const emit: Emit[] = [];
+      expect(d.iterate(emit).toString()).to.equal('I');
+      expect(emit).to.eql([]);
+    });
+  });
 });
