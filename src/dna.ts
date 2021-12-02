@@ -46,10 +46,11 @@ export class Dna {
     return new Dna(c.matchReplace(pat, tpl));
   }
 
-  execute(): Emit[] {
+  execute(stats: {iters?: number} = {}): Emit[] {
     const emit: Emit[] = [];
     let dna: Dna|undefined = this;
     while (dna) {
+      stats.iters = (stats.iters || 0) + 1;
       dna = dna.iterate(emit);
     }
     return emit;
