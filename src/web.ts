@@ -1,22 +1,24 @@
-import {Dna, Emit} from './dna.js';
+import {StringDna, Rope} from './dna.js';
 import {endo} from './endo.js';
 import {RnaCanvas} from './rna.js';
 
 //let dna!: Dna|undefined;
 //(document.getElementById('dna-prefix') as HTMLInputElement).value;
 
+const DNA = new StringDna();
+
 let canvas!: RnaCanvas;
-let timeoutId!: number|undefined;
+let timeoutId!: any;
 let running = false;
 let prefix = '';
-let dna: Dna|undefined = Dna.of(prefix + endo);
+let dna: Rope<string>|undefined = DNA.init(prefix + endo);
 let iters = 0;
 let rnaCount = 0;
 
 function reset() {
   iters = rnaCount = 0;
   prefix = (document.getElementById('dna-prefix') as HTMLInputElement).value;
-  Dna.of(prefix + endo);
+  DNA.init(prefix + endo);
   canvas = new RnaCanvas(
       document.getElementById('main-canvas') as HTMLDivElement);
   running = false;
@@ -69,15 +71,15 @@ function step() {
     if (running && timeoutId !== id) return;
     if (!dna) return;
     const start = Date.now();
-    const emits: Emit[] = [];
     while (dna && Date.now() - start < 10) {
       iters++;
-      dna = dna!.iterate(emits);
-    }
-    if (emits.length) {
-      rnaCount += emits.length;
-      for (const emit of emits) {
-        canvas.process(new Dna(emit.rna).toString());
+      const result = DNA.iterate(dna);
+      dna = result.dna;
+      if (result.rna.length) {
+        rnaCount += result.rna.length;
+        for (const emit of result.rna) {
+          canvas.process(emit.rna);
+        }
       }
     }
     document.getElementById('status-bar')!.textContent =

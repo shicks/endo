@@ -173,7 +173,7 @@ export class RnaCanvas {
     this.canvas.height = H;
     this.ctx = this.canvas.getContext('2d')!;
     this.div = div;
-    this.img = document.createElement('div');
+    this.img = document.createElement('img');
     div.appendChild(this.canvas);
   }
 
@@ -291,23 +291,23 @@ export class RnaCanvas {
     this.bitmaps[this.bitmaps.length - 1].line(this.pos, this.mark, this.pixel);
   }
   tryFill() {
-return;
+    //return;
     if (this.pixel == null) this.pixel = pixel(this.bucket);
     this.bitmaps[this.bitmaps.length - 1].tryFill(this.pos, this.pixel);
   }
   addBitmap() {
-return;
+    //return;
     this.bitmaps.push(new Bitmap());
   }
   compose() {
-return;
+    //return;
     if (this.bitmaps.length < 2) return;
     const top = this.bitmaps.pop()!;
     const bottom = this.bitmaps.pop()!;
     this.bitmaps.push(bottom.compose(top));
   }
   clip() {
-return;
+    //return;
     if (this.bitmaps.length < 2) return;
     const top = this.bitmaps.pop()!;
     const bottom = this.bitmaps.pop()!;
