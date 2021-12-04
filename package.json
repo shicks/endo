@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "node_modules/esbuild/bin/esbuild --bundle --outdir=dist/test --platform=node --sourcemap=inline test/*_test.ts && node_modules/mocha/bin/mocha dist/test/*_test.js",
-    "main": "node_modules/esbuild/bin/esbuild --bundle --outfile=dist/index.js --platform=node src/index.ts && node dist/index.js"
+    "main": "node_modules/esbuild/bin/esbuild --bundle --outfile=dist/index.js --platform=node --sourcemap=inline src/index.ts && node dist/index.js",
+    "web": "node_modules/esbuild/bin/esbuild --watch --bundle --outfile=public/dist/bundle.js --sourcemap=inline src/web.ts & (cd public; http-server -p 8080)"
   },
   "author": "",
   "license": "ISC",

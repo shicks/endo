@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<body style="background: #aaa">
+<div class="controls">
+  <input id="dna-prefix">
+  <!-- DNA execution -->
+  <input type="submit" id="start-button" value="Start">
+  <input type="submit" id="stop-button" value="Stop">
+  <input type="submit" id="reset-button" value="Reset">
+  <!-- RNA rendering and back/forth -->
+  <input type="submit" id="back-100" value="-100">
+  <input type="submit" id="back-10" value="-10">
+  <input type="submit" id="back-1" value="-1">
+  <input type="submit" id="plus-1" value="+1">
+  <input type="submit" id="plus-10" value="+10">
+  <input type="submit" id="plus-100" value="+100">
+</div>
+<div class="status" id="status-bar"></div>
+<div id="main-canvas"></div>
+<script type="module" src="dist/bundle.js"></script>

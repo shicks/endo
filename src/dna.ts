@@ -40,9 +40,15 @@ export class Dna {
   iterate(emit: Emit[]): Dna|undefined {
     const c = this.cursor();
     const pat = c.pattern(emit);
-    if (!pat) return undefined;
+    if (!pat) {
+//      console.log(this.toString().substring(0, 1000));
+      return undefined;
+    }
+//    console.log(`Pattern:  ${showList(pat.map(showItem))}`);
     const tpl = c.template(emit);
     if (!tpl) return undefined;
+//    console.log(`Template: ${showList(tpl.map(showItem))}`);
+//    console.log(`Position: ${c.index} / ${c.length}`);
     return new Dna(c.matchReplace(pat, tpl));
   }
 
@@ -51,6 +57,7 @@ export class Dna {
     let dna: Dna|undefined = this;
     while (dna) {
       stats.iters = (stats.iters || 0) + 1;
+//      console.log(`\nIteration ${stats.iters}: ${dna.length}`);
       dna = dna.iterate(emit);
     }
     return emit;
@@ -71,6 +78,22 @@ export class Dna {
   }
 }
 
+function showItem(item: PItem|TItem): string {
+  switch (item.type) {
+    case 'bases': return new Dna(item.bases).toString();
+    case 'close': return ')';
+    case 'open': return '(';
+    case 'skip': return '!' + item.count.val;
+    case 'search': return '?' + new Dna(item.query).toString();
+    case 'len': return '#' + item.group.val;
+    case 'ref': return '<' + item.group.val + '>' + item.level.val;
+  }
+}
+function showList(items: string[], space = ' '): string {
+  if (items.length > 100) return `${items.slice(0, 70).join(space)} ... ${items.length - 95} more ...  ${items.slice(items.length - 25).join(space)}`;
+  return items.join(space);
+}
+
 // Maintain an AVL tree
 export type Node = App | Str;
 type Str = Int32Array;
@@ -80,9 +103,131 @@ interface App {
   readonly length: number;
   readonly depth: number;
 }
+interface Bases {
+  type: 'bases';
+  bases: Node;
+}
+interface Group {
+  type: 'open'|'close';
+  op: Node;
+}
+interface Skip {
+  type: 'skip';
+  op: Node;
+  count: Num;
+}
+interface Search {
+  type: 'search';
+  op: Node;
+  query: Node;
+}
+interface Len {
+  type: 'len';
+  op: Node;
+  group: Num;
+}
+interface Ref {
+  type: 'ref';
+  op: Node;
+  group: Num;
+  level: Num;
+}
+export interface Emit {
+  type: 'emit';
+  op: Node;
+  rna: Node;
+}
+type PItem = Bases|Group|Skip|Search;
+type TItem = Bases|Len|Ref;
+type Control = Emit|{type: 'done'|'finish'};
+interface Num {
+  node: Node;
+  val: number;
+}
 
+function finish(msg: string) {
+//  console.log(`Finish: ${msg}`);
+  return FINISH;
+}
+const FINISH = {type: 'finish'} as Control;
 const BASES = 'ICFP';
 const INV_BASES = new Map([...BASES].map((v, i) => [v, i] as const));
+
+// With optional transient finger...?
+interface Rope<T> extends Iterable<T> {
+  readonly length: number;
+  at(index: number): T;
+  find(needle: Iterable<T>, start: number): number;
+  slice(start: number, end: number): Rope<T>;
+  splice(start: number, len: number, insert: Iterable<T>): Rope<T>;
+  toString(): string;
+}
+interface Alphabet<T> {
+  base(t: T): number|undefined;
+  fromBase(n: number): T;
+  escape(ts: Iterable<T>, level: number): Rope<T>;
+  rope(str: string): Rope<T>;
+}
+
+const STRINGS: Alphabet<string> {
+  base(str: string) {
+    return {I:0,C:1,F:2,P:3}[str];
+  }
+  fromBase(n: number) {
+    return 'ICFP'[n & 3];
+  }
+  escape(str: Iterable<string>, level: number): Rope<string> {
+    const strStr = typeof str === 'string' ? str : [...str].join('');
+    if (level === 0) return new StringRope(strStr);
+    while (STR_ESCAPE.length < level + 4) {
+      STR_ESCAPE.push(
+          this.escape(STR_ESCAPE[STR_ESCAPE.length - 1], 1).toString());
+    }
+    let escaped = '';
+    for (const c of strStr) escaped += STR_ESCAPE[this.base(c) + level];
+    return escaped;
+  }
+  rope(str: string): Rope<string> {
+    return new StringRope(str);
+  }
+}
+const STR_ESCAPE = ['I', 'C', 'F', 'P', 'IC'];
+
+class StringRope implements Rope<string> {
+  readonly length: number;
+  constructor(private str: string) {
+    this.length = str.length;
+  }
+  at(index: number) { return str[index]; }
+  find(needle: Iterable<string>, start: number) {
+    const needleStr =
+        typeof needle === 'string' ? needle : [...needle].join('');
+    return str.indexOf(needleStr, start);
+  }
+  slice(start: number, end: number): Rope<string> {
+    return new StringRope(str.substring(start. end));
+  }
+  splice(start: number, length: number,
+         insert: Iterable<string>): Rope<string> {
+    const insertStr =
+        typeof insert === 'string' ? insert : [...insert].join('');
+    return new StringRope(str.substring(0, start) +
+        insertStr + str.substring(start + length));
+  }
+}
+
+
+interface ICursor2 {
+  readonly index: number;
+  readonly length: number; // convenience?
+  seek(index: number): void;
+  skip(delta: number): void;
+  //find(needle: ReadonlyRope): boolean;
+  peek(): number; // ???
+  // slice(start: number, end: number): ReadonlyRope; // ??
+  // splice(start: number, len: number, insert: ReadonlyRope): void; // ?
+}
+
 
 interface ICursor {
   readonly index: number;
@@ -145,6 +290,7 @@ class Cursor implements ICursor {
         this.pos -= leftLen;
       }
     }
+      if (this.pos >= this.cur.length && this.index < this.length){try{throw new Error();}catch(err){console.error(err.stack);} console.log(`EEK! ${this.index}/${this.length}: ${this.pos} of ${this.cur.length}`);}
     // Now we're pointing at a leaf?
   }
 
@@ -158,6 +304,7 @@ class Cursor implements ICursor {
       if (dir) this.pos += node.left.length;
       this.cur = node;
     }
+      if (this.pos >= this.cur.length && this.index < this.length){try{throw new Error();}catch(err){console.error(err.stack);} console.log(`EEK! ${this.index}/${this.length}: ${this.pos} of ${this.cur.length}`);}
   }
 
   seek(index: number) {
@@ -253,9 +400,9 @@ class Cursor implements ICursor {
 
   peek(): string {
     this.descend();
-    if (!isLeaf(this.cur)) return '';
+    if (!isLeaf(this.cur)) {console.log(`not leaf`);return '';}
     const num = this.cur[this.pos];
-    if (num == null) return '';
+    if (num == null) {console.log(`no num ${this.pos} ${this.cur.length}`);return '';}
     return BASES[num & 3];
   }
 
@@ -285,7 +432,7 @@ class Cursor implements ICursor {
           case 'I': return {type: 'emit', op, rna: this.slice(7)!};
           case 'C': case 'F': return {type: 'close', op};
           case 'P': return {type: 'open', op};
-          default: return FINISH;
+          default: return finish('end in middle of pattern after II');
         }
       } else if (second === 'C') {
         // start a run of escaped chars
@@ -298,17 +445,17 @@ class Cursor implements ICursor {
         // two-char op: IP (skip)
         const op = this.slice(2)!;
         const count = this.nat();
-        if (!count) return FINISH;
+        if (!count) return finish('end in middle of skip number');
         return {type: 'skip', op, count};
       } else {
         this.next(); // push us off the end
-        return FINISH;
+        return finish('end in middle of pattern after I');
       }
     } else if (first) {
       // start a run of escaped chars
       return this.bases();
     }
-    return FINISH;
+    return finish(`end in middle of pattern: first=[${first}] index=${this.index} length=${this.length}`);
   }
 
   pattern(emits: Emit[]): PItem[]|undefined {
@@ -318,13 +465,16 @@ class Cursor implements ICursor {
       const item = this.patternItem();
       switch (item.type) {
         case 'finish':
+//          console.log(showList(pattern.slice(0, 80).map(showItem)));
           return undefined;
         case 'open':
           lvl++;
+          pattern.push(item);
           break;
         case 'close':
           lvl--;
           if (lvl < 0) return pattern;
+          pattern.push(item);
           break;
         case 'emit':
           emits.push(item);
@@ -349,9 +499,9 @@ class Cursor implements ICursor {
           case 'C': case 'F': return {type: 'done'};
           case 'P': 
             const group = this.nat();
-            if (!group) return FINISH;
+            if (!group) return finish('end in middle of ref length');
             return {type: 'len', op, group};
-          default: return FINISH;
+          default: return finish('template at end after II');
         }
       } else if (second === 'C') {
         // start a run of escaped chars
@@ -360,9 +510,9 @@ class Cursor implements ICursor {
         // two-char op: IF (group reference)
         const op = this.slice(2)!;
         const level = this.nat();
-        if (!level) return FINISH;
+        if (!level) return finish('end in middle of ref level');
         const group = this.nat();
-        if (!group) return FINISH;
+        if (!group) return finish('end in middle of ref group');
         return {type: 'ref', op, level, group};
       } else {
         this.next(); // 2nd is nothing, only 1 left: push us off the end
@@ -371,7 +521,7 @@ class Cursor implements ICursor {
       // start a run of escaped chars
       return this.bases();
     }
-    return FINISH;
+    return finish('template at end');
   }
 
   template(emits: Emit[]): TItem[]|undefined {
@@ -409,46 +559,110 @@ class Cursor implements ICursor {
 
   matchReplace(pat: PItem[], t: TItem[]): Node {
     const startIndex = this.index; // save in case not found
-    const env: Node[] = [];
+    //console.log(`Starting match at ${startIndex}`);
+    const env: [number, number][] = [];
     const c: number[] = [];
+    let i = -1;
     // Match the pattern
     for (const p of pat) {
+      i++;
       switch (p.type) {
         case 'bases':
           if (!this.matchBases(p.bases)) {
+            //console.log(`Match failed on item ${i}: ${showItem(p)}`);
             this.seek(startIndex);
             return this.suffix();
           }
+          //console.log(`  Matched bases ${new Dna(p.bases).toString()}: ${this.index}`);
           break;
         case 'open':
           c.push(this.index);
+          //console.log(`  Matched open: ${this.index}`);
           break;
         case 'close':
           if (!c.length) throw 'impossible ) without (';
-          const len = this.index - c.pop()!;
-          this.skip(-len);
-          env.push(this.slice(len)!);
+          env.push([c.pop(), this.index]);
+          //console.log(`  Matched close: ${this.index}`);
           break;
         case 'skip':
           this.skip(p.count.val);
           if (this.index > this.length) {
+            //console.log(`  Match failed on item ${i}: ${showItem(p)}`);
             this.seek(startIndex);
             return this.suffix();
           }
+          //console.log(`  Matched skip ${p.count.val}: ${this.index}`);
           break;
         case 'search':
           if (!this.find(p.query)) {
+            //console.log(`  Match failed on item ${i}: ${showItem(p)}`);
             this.seek(startIndex);
             return this.suffix();
           }
+          //console.log(`  Matched search: ${this.index}`);
           break;
         default:
           throw new Error(`impossible pattern: ${p!.type}`);
       }
     }
     // Replace the template
-    const repl = replace(t, env);
-    return repl ? join(repl, this.suffix()) : this.suffix();
+//console.log(`Match finished at ${this.index}`);
+    // for (let i = 0; i < env.length; i++) {
+    //   const str = new Dna(env[i]).toString();
+    //   console.log(`  ${i}: #${str.length} ${showList([...str], '')}`);
+    // }
+    return this.replace(t, env);
+    // const replStr = repl ? new Dna(repl).toString() : 'undefined';
+    // console.log(`Replacement: #${repl.length} ${showList([...replStr], '')}`);
+  }
+
+  replace(tpl: TItem[], env: [number, number][]) {
+    let keep = -1;
+    let keepIndex = -1;
+    let i = -1;
+    for (const t of tpl) {
+      i++;
+      if (t.type !== 'ref' || t.level.val) continue;
+      const g = t.group.val;
+      if (keep < 0 || env[g][1] - env[g][0] > env[keep][1] - env[keep][0]) {
+        keep = g;
+        keepIndex = -1;
+      }
+    }
+    let dropPrefix = 0;
+    let dropInfix = this.index;
+    let addPrefix = tpl;
+    let addInfix: TItem[] = [];
+    if (keep >= 0) {
+      [dropPrefix, dropInfix] = env[keep];
+      addPrefix = tpl.slice(0, keepIndex - 1);
+      addInfix = tpl.slice(keepIndex + 1);
+    }
+
+    // TODO - compute the addPrefix and addInfix replacements
+    //      - splice them into the appropriate spots
+
+    let node!: Node|undefined;
+    function push(n: Node) {
+      node = node ? join(node, n) : n;
+    }
+    for (const t of tpl) {
+      switch (t.type) {
+        case 'bases':
+          push(t.bases);
+          break;
+        case 'len':
+          push(asNat(env[t.group.val]?.length || 0, addr(t.op)));
+          break;
+        case 'ref':
+          const group = env[t.group.val];
+          if (group) push(protect(group, t.level.val));
+          break;
+        default:
+          throw new Error(`impossible template ${t!.type}`);
+      }
+    }
+    return node;
   }
 
   atEnd(): boolean {
@@ -461,10 +675,10 @@ class Cursor implements ICursor {
       this.descend();
       if (!isLeaf(this.cur) || this.pos >= this.cur.length) break;
       const chars = Math.min(this.cur.length - this.pos, count);
-      const part = this.cur.subarray(this.pos, this.pos + count);
+      const part = this.cur.subarray(this.pos, this.pos + chars);
       node = node ? join(node, part) : part;
-      this.index += count;
-      this.pos += count;
+      this.index += chars;
+      this.pos += chars;
       this.ascend();
       count -= chars;
     }
@@ -501,7 +715,7 @@ class Cursor implements ICursor {
     this.descend();
     let bits = [];
     let done = false;
-    while (isLeaf(this.cur) && this.pos < this.cur.length) {
+    while (isLeaf(this.cur) && this.pos < this.cur.length && !done) {
       let start = this.pos;
       while (this.pos < this.cur.length && (this.cur[this.pos] & 3) !== 3) {
         bits.push(this.cur[this.pos++] & 1);
@@ -514,7 +728,6 @@ class Cursor implements ICursor {
       }
       const arr = this.cur.subarray(start, this.pos);
       node = node ? join(node, arr) : arr;
-      if (done) break;
       this.ascend();
       this.descend();
     }
@@ -525,30 +738,6 @@ class Cursor implements ICursor {
     if (!node) return undefined;
     return {node, val};
   }
-}
-
-function replace(tpl: TItem[], env: Node[]): Node|undefined {
-  let node!: Node|undefined;
-  function push(n: Node) {
-    node = node ? join(node, n) : n;
-  }
-  for (const t of tpl) {
-    switch (t.type) {
-      case 'bases':
-        push(t.bases);
-        break;
-      case 'len':
-        push(asNat(env[t.group.val]?.length || 0, addr(t.op)));
-        break;
-      case 'ref':
-        const group = env[t.group.val];
-        if (group) push(protect(group, t.level.val));
-        break;
-      default:
-        throw new Error(`impossible template ${t!.type}`);
-    }
-  }
-  return node;
 }
 
 function addr(node: Node): number {
@@ -604,50 +793,6 @@ function indexStr(node: Node, index: number): string {
   const num = node[index];
   return num != null ? BASES[num & 3] : '';
 }
-
-interface Bases {
-  type: 'bases';
-  bases: Node;
-}
-interface Group {
-  type: 'open'|'close';
-  op: Node;
-}
-interface Skip {
-  type: 'skip';
-  op: Node;
-  count: Num;
-}
-interface Search {
-  type: 'search';
-  op: Node;
-  query: Node;
-}
-interface Len {
-  type: 'len';
-  op: Node;
-  group: Num;
-}
-interface Ref {
-  type: 'ref';
-  op: Node;
-  group: Num;
-  level: Num;
-}
-export interface Emit {
-  type: 'emit';
-  op: Node;
-  rna: Node;
-}
-type PItem = Bases|Group|Skip|Search;
-type TItem = Bases|Len|Ref;
-type Control = Emit|{type: 'done'|'finish'};
-interface Num {
-  node: Node;
-  val: number;
-}
-
-const FINISH = {type: 'finish'} as Control;
 
 function isLeaf(node: Node): node is Str {
   return node instanceof Int32Array;
