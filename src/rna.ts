@@ -1,14 +1,14 @@
-const W = 600;
-const H = 600;
-const SIZE = W * H;
+export const W = 600;
+export const H = 600;
+export const SIZE = W * H;
 
 type Pos = number;
 type Pixel = number; // RGBA (R = msb, A = lsb)
 type Bucket = number[];
 
-const LOG = document.createElement('div');
-document.body.appendChild(LOG);
-LOG.style.whiteSpace = 'pre';
+// const LOG = document.createElement('div');
+// document.body.appendChild(LOG);
+// LOG.style.whiteSpace = 'pre';
 
 const enum Dir {
   E = 0,
@@ -33,7 +33,7 @@ const enum Alpha {
 type Color = Rgb | Alpha;
 
 function pixel(bucket: Bucket): Pixel {
-LOG.textContent += `PIXEL: bucket=${bucket.join(' ')}\n`;
+// LOG.textContent += `PIXEL: bucket=${bucket.join(' ')}\n`;
   let n = 0;
   let r = 0;
   let g = 0;
@@ -69,7 +69,7 @@ export class Bitmap {
     const y0 = (p0 / W) | 0;
     const x1 = p1 % W;
     const y1 = (p1 / W) | 0;
-    LOG.textContent += `Line ${x0},${y0} - ${x1},${y1} @ ${pixel.toString(16)}\n`;
+    // LOG.textContent += `Line ${x0},${y0} - ${x1},${y1} @ ${pixel.toString(16)}\n`;
     const dx = x1 - x0;
     const dy = y1 - y0;
     const d = Math.max(Math.abs(dx), Math.abs(dy));
@@ -78,18 +78,18 @@ export class Bitmap {
     let y = y0 * d + (d - c >> 1);
     for (let i = 0; i < d; i++) {
       const pos = (y / d | 0) * W + (x / d | 0);
-LOG.textContent += `  ${pos%W},${pos/W|0}`;
+// LOG.textContent += `  ${pos%W},${pos/W|0}`;
       x += dx;
       y += dy;
       // TODO - consider saving previous value?
       this.data[pos] = pixel;
     }
     this.data[y1 * W + x1] = pixel;
-LOG.textContent += `\n`;
+// LOG.textContent += `\n`;
   }
 
   tryFill(pos: Pos, pixel: Pixel) {
-    LOG.textContent += `Fill ${pos % W},${pos / W | 0} @ ${pixel.toString(16)}\n`;
+    // LOG.textContent += `Fill ${pos % W},${pos / W | 0} @ ${pixel.toString(16)}\n`;
     let old = this.data[pos];
     if (pixel === old) return;
     const seen = new Set<Pos>([pos]);
@@ -151,15 +151,8 @@ LOG.textContent += `\n`;
   }
 }
 
-export class RnaCanvas {
-  div: HTMLDivElement;
-  img: HTMLImageElement;
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
+export abstract class AbstractRnaCanvas {
   lines: number = 0;
-  snapshots: string[] = [];
-  cursor: number = -1;
-
   bitmaps: Bitmap[] = [new Bitmap()];
   bucket: Bucket = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   pixel: Pixel|undefined = 255;
@@ -167,34 +160,8 @@ export class RnaCanvas {
   mark: Pos = 0;
   dir: Dir = Dir.E;
 
-  constructor(div: HTMLDivElement) {
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = W;
-    this.canvas.height = H;
-    this.ctx = this.canvas.getContext('2d')!;
-    this.div = div;
-    this.img = document.createElement('img');
-    div.appendChild(this.canvas);
-  }
-
-  advance(delta: number) {
-    if (this.cursor = -1) this.cursor = this.snapshots.length - 1;
-    this.cursor =
-        Math.max(0, Math.min(this.cursor + delta, this.snapshots.length - 1));
-    this.img.src = this.snapshots[this.cursor];
-  }
-
-  render() {
-    const imageData = this.ctx.getImageData(0, 0, W, H);
-    const view = new DataView(imageData.data.buffer);
-    const data = this.bitmaps[this.bitmaps.length - 1].data;
-    for (let i = 0; i < SIZE; i++) {
-      view.setUint32(i << 2, data[i], false);
-    }
-      console.log([...new Uint32Array(view.buffer)]);
-    this.ctx.putImageData(imageData, 0, 0);
-    if (this.cursor < 0) this.img.src = this.canvas.toDataURL();
-  }
+  //abstract render(data: Uint32Array): void;
+  abstract snapshot(): void;
 
   process(rna: string) {
     switch (rna) {
@@ -240,7 +207,7 @@ export class RnaCanvas {
         this.snapshot();
         break;
       default:
-        console.log(`Got unknown RNA ${rna}`);
+        //console.log(`Got unknown RNA ${rna}`);
     }
   }
   done() {
@@ -250,10 +217,6 @@ export class RnaCanvas {
   maybeSnapshot() {
     if (this.lines > 0) this.snapshot();
     this.lines = 0;
-  }
-  snapshot() {
-    this.render();
-    this.snapshots.push(this.canvas.toDataURL());
   }
 
   addColor(color: Color) {

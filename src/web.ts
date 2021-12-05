@@ -1,13 +1,13 @@
 import {StringDna, Rope} from './dna.js';
 import {endo} from './endo.js';
-import {RnaCanvas} from './rna.js';
+import {DomRnaCanvas} from './domrna.js';
 
 //let dna!: Dna|undefined;
 //(document.getElementById('dna-prefix') as HTMLInputElement).value;
 
 const DNA = new StringDna();
 
-let canvas!: RnaCanvas;
+let canvas!: DomRnaCanvas;
 let timeoutId!: any;
 let running = false;
 let prefix = '';
@@ -19,7 +19,7 @@ function reset() {
   iters = rnaCount = 0;
   prefix = (document.getElementById('dna-prefix') as HTMLInputElement).value;
   DNA.init(prefix + endo);
-  canvas = new RnaCanvas(
+  canvas = new DomRnaCanvas(
       document.getElementById('main-canvas') as HTMLDivElement);
   running = false;
   clearTimeout(timeoutId);

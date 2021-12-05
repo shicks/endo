@@ -5,6 +5,10 @@
 // and +30.  ±31 is used as "infinity", and -32 is a NaN, i.e. it didn't
 // come directly from a base in the source.
 
+function log(f: () => string): void {
+  //console.log(f());
+}
+
 // With optional transient finger...?
 export interface Rope<T> extends Iterable<T> {
   readonly length: number;
@@ -71,7 +75,7 @@ interface Template<T> {
 }
 
 const ESCAPES: number[][] = [[0], [1], [2], [3], [0, 1]];
-abstract class AbstractDna<T> {
+export abstract class AbstractDna<T> {
   saveOp = false;
 
   abstract base(t: T): number;
@@ -114,14 +118,15 @@ abstract class AbstractDna<T> {
   }
 
   iterate(dna: Rope<T>): DnaResult<T> {
+    log(() => `\nIteration ${++ITERATION} (len=${dna.length})`);
     const rna: Emit<T>[] = [];
     const pat = this.pattern(dna, rna, 0);
     if (pat.index < 0) return {rna, finish: true};
-//    console.log(`Pattern:  ${showList(pat.map(showItem))}`);
+    log(() => `Pattern:  ${pat.pat.map(showItem).join(' ')}`);
     const tpl = this.template(dna, rna, pat.index);
     if (tpl.index < 0) return {rna, finish: true};
-//    console.log(`Template: ${showList(tpl.map(showItem))}`);
-//    console.log(`Position: ${c.index} / ${c.length}`);
+    log(() => `Template: ${tpl.tpl.map(showItem).join(' ')}`);
+    log(() => `Position: ${tpl.index} / ${dna.length}`);
     return {
       rna, finish: false,
       dna: this.matchReplace(dna, pat.pat, tpl.tpl, tpl.index),
@@ -256,6 +261,7 @@ abstract class AbstractDna<T> {
                 op: this.slice(dna, index - 2, index),
                 level, group,
               });
+              index = i2;
               break;
             }
           }
@@ -331,6 +337,7 @@ abstract class AbstractDna<T> {
         }
       }
     }
+    log(() => `Matched ${index - start} bases: ${env.map(r => `[${r.join('..')}]#${r[1]-r[0]}`).join(' ')}`);
     return this.replace(dna, index, t, env);
   }
 
@@ -339,14 +346,15 @@ abstract class AbstractDna<T> {
 
     let keep = -1;
     let keepIndex = -1;
-    for (const t of tpl) {
+    for (let i = 0; i < tpl.length; i++) {
+      const t = tpl[i];
       if (t.type !== 'ref' || t.level.val) continue;
       const g = t.group.val;
       if (keep < 0 ||
           (g < env.length &&
            env[g][1] - env[g][0] > env[keep][1] - env[keep][0])) {
         keep = g;
-        keepIndex = -1;
+        keepIndex = i;
       }
     }
     let dropPrefix = index;
@@ -355,11 +363,12 @@ abstract class AbstractDna<T> {
     let addInfix: TItem<T>[] = [];
     if (keep >= 0 && keep < env.length) {
       [dropPrefix, dropInfix] = env[keep];
-      addPrefix = tpl.slice(0, keepIndex - 1);
+      addPrefix = tpl.slice(0, keepIndex);
       addInfix = tpl.slice(keepIndex + 1);
     }
     const prefix = this.expand(addPrefix, d, env);
     const infix = this.expand(addInfix, d, env);
+    //log(() => `Keep <${keep}>0 (@${keepIndex})\nPrefix ${addPrefix.map(showItem).join(' ')} #${prefix.length} replaces ${dropPrefix}\nInfix ${addInfix.map(showItem).join(' ')} #${infix.length} replaces ${index - dropInfix}`);
     return d.splice(dropInfix, index - dropInfix, infix)
         .splice(0, dropPrefix, prefix);
   }
@@ -449,3 +458,16 @@ class StringRope implements Rope<string> {
     return this.str;
   }
 }
+
+function showItem(item: PItem<unknown>|TItem<unknown>): string {
+  switch (item.type) {
+    case 'bases': return item.bases.toString();
+    case 'close': return ')';
+    case 'open': return '(';
+    case 'skip': return '!' + item.count.val;
+    case 'search': return '?' + item.query.toString();
+    case 'len': return '#' + item.group.val;
+    case 'ref': return '<' + item.group.val + '>' + item.level.val;
+  }
+}
+let ITERATION = 0;
