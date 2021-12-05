@@ -12,10 +12,10 @@ export class RopeDna extends AbstractDna<string> {
     return 'ICFP'[n & 3];
   }
   isRope(arg: unknown): arg is Rope<string> {
-    return typeof arg === 'string';
+    return arg instanceof StringRope;
   }
-  rope(str: string): Rope<string> {
-    return new StringRope(str);
+  rope(s: Iterable<string>): Rope<string> {
+    return s instanceof StringRope ? s : new StringRope(str(s));
   }
   init(str: string): Rope<string> {
     return new StringRope(str);
@@ -29,12 +29,12 @@ class StringRope implements Rope<string> {
   }
   * [Symbol.iterator]() {
     const stack: Node[] = [this.node];
-    let cur: Node;
     while (stack.length) {
-      if (!isLeaf(cur = stack.pop()!)) {
-        stack.push(cur.right, cur.left);
-      } else {
+      const cur = stack.pop()!;
+      if (isLeaf(cur)) {
         yield* cur;
+      } else {
+        stack.push(cur.right, cur.left);
       }
     }
   }
@@ -122,10 +122,11 @@ function find(haystack: Node, needle: string, start: number): number {
 
 function slice(n: Node, start: number, end: number): Node {
   let node!: Node;
+const origStart=start,origEnd=end;
   const stack: Node[] = [n];
   while (stack.length) {
     const cur = stack.pop()!;
-    if (start > cur.length) {
+    if (start >= cur.length) {
       start -= cur.length;
       end -= cur.length;
     } else if (isLeaf(cur)) {
@@ -139,7 +140,11 @@ function slice(n: Node, start: number, end: number): Node {
       stack.push(cur.right, cur.left);
     }
   }
-  if (!node) return ''; // never found start?
+  if (!node) {
+//console.dir(n);console.log(origStart, origEnd);
+//throw new Error('BAD SLICE 1');
+return ''; // never found start?
+}
   while (stack.length) {
     const cur = stack.pop()!;
     if (end >= cur.length) {
@@ -152,10 +157,15 @@ function slice(n: Node, start: number, end: number): Node {
       stack.push(cur.right, cur.left);
     }
   }
+// if (node.length !== origEnd - origStart) {
+// console.dir(n);console.dir(node);console.log(origStart, origEnd);
+// throw new Error(`BAD SLICE 2`);}
   return node;
 }
 
 function splice(n: Node, start: number, len: number, insert: string): Node {
+// const origLen = len;
+// const origStart = start;
   let node: Node = '';
   const stack: Node[] = [n];
   while (stack.length) {
@@ -168,10 +178,10 @@ function splice(n: Node, start: number, len: number, insert: string): Node {
       if (start + len <= cur.length) {
         stack.push(cur.substring(start + len));
         len = 0;
-        break;
       } else {
         len -= (cur.length - start);
       }
+      break;
     } else {
       stack.push(cur.right, cur.left);
     }
@@ -181,7 +191,7 @@ function splice(n: Node, start: number, len: number, insert: string): Node {
     if (len >= cur.length) {
       len -= cur.length;
     } else if (isLeaf(cur)) {
-      stack.push(cur.substring(length));
+      stack.push(cur.substring(len));
       break;
     } else {
       stack.push(cur.right, cur.left);
@@ -191,11 +201,17 @@ function splice(n: Node, start: number, len: number, insert: string): Node {
   while (stack.length) {
     node = join(node, stack.pop()!);
   }
+//  if (node.length !== n.length - origLen + insert.length) {
+//console.dir(n);
+//console.dir(node);
+//throw new Error(`BAD SPLICE ${n.length}@${origStart} - ${origLen} + ${insert.length} ${insert}`);}
   return node;
 }
 
 function join(left: Node, right: Node): Node {
   // Move nodes around until we're balanced...
+//const origLeft = left;
+//const origRight = right;
   if (!left.length) return right as App;
   if (!right.length) return left as App;
   if (left.length + right.length < THRESHOLD) {
@@ -233,6 +249,9 @@ function join(left: Node, right: Node): Node {
     }
   }
   // balanced, just join
+  if (!left) throw `no left`;
+  if (!right) throw `no right`;
+// if (toString(left)+toString(right) !== toString(origLeft)+toString(origRight))throw new Error(`bad join`);
   return {
     left, right,
     depth: Math.max(dl, dr) + 1,

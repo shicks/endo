@@ -319,7 +319,7 @@ export abstract class AbstractDna<T> {
         case 'bases':
           for (let b of p.bases) {
             if (this.base(b) !== this.base(dna.at(index++))) {
-              return dna.slice(start);
+              return dna.splice(0, start);
             }
           }
           break;
@@ -327,11 +327,11 @@ export abstract class AbstractDna<T> {
         case 'close': env.push([c.pop()!, index]); break;
         case 'skip':
           index += p.count.val;
-          if (index > dna.length) return dna.slice(start);
+          if (index > dna.length) return dna.splice(0, start);
           break;
         case 'search': {
           const newIndex = dna.find(p.query, index);
-          if (newIndex < 0) return dna.slice(start);
+          if (newIndex < 0) return dna.splice(0, start);
           index = newIndex + p.query.length;
           break;
         }
@@ -420,8 +420,9 @@ export class StringDna extends AbstractDna<string> {
   isRope(arg: unknown): arg is Rope<string> {
     return typeof arg === 'string';
   }
-  rope(str: string): Rope<string> {
-    return new StringRope(str);
+  rope(s: Iterable<string>): Rope<string> {
+    return s instanceof StringRope ? s :
+        new StringRope(typeof s === 'string' ? s : [...s].join(''));
   }
   init(str: string): Rope<string> {
     return new StringRope(str);
