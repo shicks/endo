@@ -5,17 +5,21 @@
 // and +30.  ±31 is used as "infinity", and -32 is a NaN, i.e. it didn't
 // come directly from a base in the source.
 
+let verbose = false;
+export function setDnaVerbose(newVerbose: boolean) {
+  verbose = newVerbose;
+}
 function log(f: () => string): void {
-  //console.log(f());
+  if (verbose) console.error(f());
 }
 
 // With optional transient finger...?
 export interface Rope<T> extends Iterable<T> {
   readonly length: number;
   at(index: number): T;
-  find(needle: Iterable<T>, start: number): number;
+  find(needle: Rope<T>, start: number): number;
   slice(start: number, end?: number): Rope<T>;
-  splice(start: number, len: number, insert?: Iterable<T>): Rope<T>;
+  splice(start: number, len: number, insert?: Rope<T>): Rope<T>;
   toString(): string;
 }
 
@@ -77,6 +81,7 @@ interface Template<T> {
 const ESCAPES: number[][] = [[0], [1], [2], [3], [0, 1]];
 export abstract class AbstractDna<T> {
   saveOp = false;
+  abstract readonly EMPTY: Rope<T>;
 
   abstract base(t: T): number;
   abstract fromBase(n: number): T;
@@ -84,12 +89,16 @@ export abstract class AbstractDna<T> {
   abstract rope(iterable: Iterable<T>): Rope<T>; // should short-circuit
   abstract init(str: string): Rope<T>;
 
-  slice(dna: Rope<T>, start: number, end?: number): Rope<T>|undefined {
+  join(left: Rope<T>, right: Rope<T>): Rope<T> {
+    return right.splice(0, 0, left);
+  }
+
+  sliceOp(dna: Rope<T>, start: number, end?: number): Rope<T>|undefined {
     if (!this.saveOp) return undefined;
     return dna.slice(start, end);
   }
 
-  escape(ts: Iterable<T>, level: number): Iterable<T> {
+  escape(ts: Iterable<T>, level: number): Rope<T> {
     if (level === 0) return this.rope(ts);
     while (ESCAPES.length < level + 4) {
       ESCAPES.push(ESCAPES[ESCAPES.length - 1].flatMap(n => ESCAPES[n + 1]));
@@ -98,10 +107,10 @@ export abstract class AbstractDna<T> {
     for (const t of ts) {
       bases.push(...ESCAPES[this.base(t) + level].map(b => this.fromBase(b)));
     }
-    return bases;
+    return this.rope(bases);
   }
 
-  unescape(ts: Iterable<T>): Iterable<T> {
+  unescape(ts: Iterable<T>): Rope<T> {
     const bases: T[] = [];
     let skip = false;
     for (const t of ts) {
@@ -114,7 +123,7 @@ export abstract class AbstractDna<T> {
         bases.push(this.fromBase(this.base(t) - 1));
       }
     }
-    return bases;
+    return this.rope(bases);
   }
 
   iterate(dna: Rope<T>): DnaResult<T> {
@@ -148,7 +157,7 @@ export abstract class AbstractDna<T> {
                 case 0: // III -> emit
                   rna.push({
                     type: 'emit',
-                    dna: this.slice(dna, index - 3, index + 7),
+                    dna: this.sliceOp(dna, index - 3, index + 7),
                     rna: dna.slice(index, index + 7).toString(),
                   });
                   index += 7;
@@ -157,7 +166,7 @@ export abstract class AbstractDna<T> {
                   if (lvl-- > 0) {
                     pat.push({
                       type: 'close',
-                      op: this.slice(dna, index - 3, index),
+                      op: this.sliceOp(dna, index - 3, index),
                     });
                   } else {
                     return {pat, index};
@@ -167,7 +176,7 @@ export abstract class AbstractDna<T> {
                   lvl++;
                   pat.push({
                     type: 'open',
-                    op: this.slice(dna, index - 3, index),
+                    op: this.sliceOp(dna, index - 3, index),
                   });
                   break;
               }
@@ -182,7 +191,7 @@ export abstract class AbstractDna<T> {
               const [newIndex, query] = this.readBases(dna, index + 1);
               pat.push({
                 type: 'search',
-                op: this.slice(dna, index - 2, index + 1),
+                op: this.sliceOp(dna, index - 2, index + 1),
                 query,
               });
               index = newIndex;
@@ -193,7 +202,7 @@ export abstract class AbstractDna<T> {
               if (newIndex < 0) return {pat, index: -1}
               pat.push({
                 type: 'skip',
-                op: this.slice(dna, index - 2, index),
+                op: this.sliceOp(dna, index - 2, index),
                 count,
               });
               index = newIndex;
@@ -225,7 +234,7 @@ export abstract class AbstractDna<T> {
                 case 0: // III -> emit
                   rna.push({
                     type: 'emit',
-                    dna: this.slice(dna, index - 3, index + 7),
+                    dna: this.sliceOp(dna, index - 3, index + 7),
                     rna: dna.slice(index, index + 7).toString(),
                   });
                   index += 7;
@@ -237,7 +246,7 @@ export abstract class AbstractDna<T> {
                   if (newIndex < 0) return {tpl, index: -1}
                   tpl.push({
                     type: 'len',
-                    op: this.slice(dna, index - 3, index),
+                    op: this.sliceOp(dna, index - 3, index),
                     group,
                   });
                   index = newIndex;
@@ -258,7 +267,7 @@ export abstract class AbstractDna<T> {
               if (i2 < 0) return {tpl, index: -1}
               tpl.push({
                 type: 'ref',
-                op: this.slice(dna, index - 2, index),
+                op: this.sliceOp(dna, index - 2, index),
                 level, group,
               });
               index = i2;
@@ -280,13 +289,13 @@ export abstract class AbstractDna<T> {
     const start = index;
     for (;;) {
       if (index >= dna.length) {
-        return [index, this.rope(this.unescape(dna.slice(start, index)))];
+        return [index, this.unescape(dna.slice(start, index))];
       }
       if (this.base(dna.at(index)) !== 0) {
         index++;
       } else {
         if (index + 1 >= dna.length || this.base(dna.at(index + 1)) !== 1) {
-          return [index, this.rope(this.unescape(dna.slice(start, index)))];
+          return [index, this.unescape(dna.slice(start, index))];
         }
         index += 2;
       }
@@ -373,20 +382,20 @@ export abstract class AbstractDna<T> {
         .splice(0, dropPrefix, prefix);
   }
 
-  expand(tpl: TItem<T>[], dna: Rope<T>, env: [number, number][]): T[] {
-    let out: T[] = [];
+  expand(tpl: TItem<T>[], dna: Rope<T>, env: [number, number][]): Rope<T> {
+    let out: Rope<T> = this.EMPTY;
     for (const t of tpl) {
       switch (t.type) {
         case 'bases': 
-          out = out.concat([...t.bases]);
+          out = this.join(out, t.bases);
           break;
         case 'len':
-          out = out.concat([...this.asNat(t, env)]);
+          out = this.join(out, this.asNat(t, env));
           break;
         case 'ref':
           if (t.group.val < env.length) {
-            out = out.concat([...this.escape(
-                dna.slice(...env[t.group.val]), t.level.val)]);
+            out = this.join(out, this.escape(
+                dna.slice(...env[t.group.val]), t.level.val));
           }
           break;
       }
@@ -394,7 +403,7 @@ export abstract class AbstractDna<T> {
     return out;
   }
 
-  asNat(t: Len<T>, env: [number, number][]): T[] {
+  asNat(t: Len<T>, env: [number, number][]): Rope<T> {
     if (t.group.val >= env.length) return [this.fromBase(3)];
     let n = env[t.group.val][1] - env[t.group.val][0];
     const ts: T[] = [];
@@ -403,12 +412,13 @@ export abstract class AbstractDna<T> {
       n >>>= 1;
     }
     ts.push(this.fromBase(3));
-    return ts;
+    return this.rope(ts);
   }
 }
 
 
 export class StringDna extends AbstractDna<string> {
+  readonly EMPTY = new StringRope('');
   base(str: string) {
     const x = {I:0,C:1,F:2,P:3}[str];
     if (x == null) throw new Error(`Invalid base: ${str}`);
@@ -427,6 +437,9 @@ export class StringDna extends AbstractDna<string> {
   init(str: string): Rope<string> {
     return new StringRope(str);
   }
+  join(left: Rope<string>, right: Rope<string>): Rope<string> {
+    return new StringRope(left.str + right.str);
+  }
 }
 
 class StringRope implements Rope<string> {
@@ -438,9 +451,8 @@ class StringRope implements Rope<string> {
     return this.str[Symbol.iterator]();
   }
   at(index: number) { return this.str[index]; }
-  find(needle: Iterable<string>, start: number) {
-    const needleStr =
-        typeof needle === 'string' ? needle : [...needle].join('');
+  find(needle: Rope<string>, start: number) {
+    const needleStr = needle.toString();
     return this.str.indexOf(needleStr, start);
   }
   slice(start: number, end: number): Rope<string> {

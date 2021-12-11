@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node_modules/esbuild/bin/esbuild --bundle --outdir=dist/test --platform=node --sourcemap=inline test/*_test.ts && node_modules/mocha/bin/mocha dist/test/*_test.js",
-    "main": "node_modules/esbuild/bin/esbuild --bundle --outfile=dist/index.js --platform=node --sourcemap=inline src/index.ts && node dist/index.js",
+    "build": "node_modules/esbuild/bin/esbuild --bundle --outfile=dist/bin/dna.js --platform=node --sourcemap=inline src/maindna.ts && node_modules/esbuild/bin/esbuild --bundle --outfile=dist/bin/rna.js --platform=node --sourcemap=inline src/mainrna.ts",
     "web": "node_modules/esbuild/bin/esbuild --watch --bundle --outfile=public/dist/bundle.js --sourcemap=inline src/web.ts & (cd public; http-server -p 8080)"
   },
   "author": "",
@@ -15,6 +15,7 @@
     "@types/dirty-chai": "^2.0.2",
     "@types/mocha": "^9.0.0",
     "@types/node": "^16.11.11",
+    "@types/yargs": "^17.0.7",
     "chai": "^4.3.4",
     "dirty-chai": "^2.0.1",
     "esbuild": "^0.14.1",
@@ -25,6 +26,7 @@
     "typescript": "^4.5.2"
   },
   "dependencies": {
-    "image-output": "^2.4.2"
+    "image-output": "^2.4.2",
+    "yargs": "^17.3.0"
   }
 }
