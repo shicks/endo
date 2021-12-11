@@ -1,4 +1,5 @@
 import {AbstractDna, Rope} from './dna.js';
+import {performance} from 'perf_hooks';
 
 const THRESHOLD = 500;
 
@@ -42,7 +43,14 @@ class StringRope implements Rope<string> {
     return at(this.node, index);
   }
   find(needle: Iterable<string>, start: number) {
-    return find(this.node, str(needle), start);
+    let needleStr = str(needle);
+    findStart = performance.now();
+    let result = find(this.node, needleStr, start);
+    findTotal += (performance.now() - findStart);
+    let stat = findStats.get(needleStr);
+    if (!stat) findStats.set(needleStr, stat = new FindStat());
+    stat.add(start, result);
+    return result;
   }
   slice(start: number, end: number = this.length): Rope<string> {
     return new StringRope(slice(this.node, start, end));
@@ -53,6 +61,48 @@ class StringRope implements Rope<string> {
   }
   toString() {
     return toString(this.node);
+  }
+}
+
+let findStart!: number;
+let findTotal = 0;
+class FindStat {
+  total = 0;
+  found = 0;
+  delta = new Map<number, number>();
+  get notFound() { return this.total - this.found; }
+  add(start: number, result: number) {
+    this.total++;
+    if (result < 0) return;
+    this.found++;
+    const delta = result - start;
+    this.delta.set(delta, (this.delta.get(delta) || 0) + 1);
+  }
+}
+const findStats = new Map<string, FindStat>();
+export function reportFindStats() {
+  console.log(`FIND STATS\nTotal time: ${findTotal / 1000} ms`);
+  const finds = [...findStats].sort((a, b) => b[1].total - a[1].total);
+  let total = 0;
+  for (const [,s] of finds) total += s.total;
+  console.log(`Total searches: ${total}`);
+  console.log(`Unique needles: ${finds.length}`);
+  console.log(`Most common:`);
+  for (let i = 0; i < 20 && i < finds.length; i++) {
+    const stat = finds[i][1];
+    let sum1 = 0;
+    let sum2 = 0;
+    let count = 0;
+    for (const [n, c] of stat.delta) {
+      count += c;
+      sum1 += c * n;
+      sum2 += c * n * n;
+    }
+    if (count !== stat.found) console.error(`mismatch ${finds[i][0]}: ${count} vs ${stat.found}`);
+    const mean = sum1 / count;
+    const variance = sum2 / count - mean * mean;
+    const stdev = Math.pow(variance, 0.5);
+    console.log(`  ${finds[i][0]}: #${count}/${stat.total}, delta ${mean}±${stdev}`);
   }
 }
 
@@ -122,7 +172,6 @@ function find(haystack: Node, needle: string, start: number): number {
 
 function slice(n: Node, start: number, end: number): Node {
   let node!: Node;
-const origStart=start,origEnd=end;
   const stack: Node[] = [n];
   while (stack.length) {
     const cur = stack.pop()!;

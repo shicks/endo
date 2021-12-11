@@ -1,5 +1,5 @@
 import {Rope, StringDna} from './dna.js';
-import {RopeDna} from './ropedna.js';
+import {RopeDna, reportFindStats} from './ropedna.js';
 import {endo} from './endo.js';
 import {PngRnaCanvas} from './pngrna.js';
 
@@ -43,6 +43,7 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined' &&
   }  
   console.log(`Execution complete after ${iters} iterations: ${rnaCountTotal} RNA`);
   canvas.snapshot();
+  reportFindStats();
   // for (const r of rna) {
   //   console.log(new Dna(r.rna).toString());
   // }

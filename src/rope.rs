@@ -1,252 +1,449 @@
 use std::cell::Cell;
-use std::rc::Rc;
+use std::cmp;
+use std::fmt;
+use std::mem;
 use std::ptr;
 
 fn main() {
-  let r = rope("IICIFPIFCPCIFP");
-  println!("{}", rope_str(&r));
+  let mut r: Rope<Base> = Rope::from_bases("IICIFPIFCPCIFP");
+  println!("{}", r.base_str());
+  let r2: Rope<Base> = Rope::from_bases("CIFPCICIFPCI");
+  for i in (0 .. 100) {
+    r = if i & 1 != 0 {
+      Rope::join(r, r2.clone())
+    } else {
+      Rope::join(r2.clone(), r)
+    }
+  }
+  let x: u32 = 0xffffffff;
+  let y = x as i32;
+  println!("{} {}", x, y);
+  println!("{}", r.at(800));
+  //println!("{}", r.base_str());
+  //println!("{:?}", r);
 }
 
 const THRESHOLD: usize = 500;
 
+trait BaseLike: Copy {
+  fn to_base(self) -> Base;
+  fn from_base(base: Base) -> Self;
+  fn from_base_pos(base: Base, pos: usize) -> Self;
+  fn protect(self, level: u8, out: &mut Vec<Self>) {
+    BaseLike::push(self.to_base() as u8 + level, out);
+  }
+  // TODO - how to make this private?
+  fn push(i: u8, out: &mut Vec<Self>) {
+    if i < 4 {
+      out.push(BaseLike::from_base(Base::from_u8(i)));
+    } else {
+      BaseLike::push(i - 4, out);
+      BaseLike::push(i - 3, out);
+    }
+  }
+  fn unprotect(self) -> Self {
+    // NOTE: for IC -> P, unprotect the I, not the C.
+    BaseLike::from_base(Base::from_u8(self.to_base() as u8 + 3))
+  }
+}
+
 #[repr(u8)]
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Base {
   I = 0,
   C = 1,
   F = 2,
   P = 3,
 }
+const BASE_CHARS: [char; 4] = ['I', 'C', 'F', 'P'];
 
-#[derive(Clone)]
-enum Rope {
-  App {
-    left: Rc<Rope>,
-    right: Rc<Rope>,
-    length: usize,
-    depth: i8,
-  },
-  Leaf(Rc<[Base]>),
-  Top(Rc<Rope>, Cell<usize>, Cell<*const [Base]>),
+impl fmt::Display for Base {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "{}", self.char())
+  }
 }
 
-impl Rope {
+impl Base {
+  #[inline]
+  fn from_u8(i: u8) -> Self {
+    unsafe {
+      mem::transmute::<u8, Base>(i & 3)
+    }
+  }
+  #[inline]
+  fn char(&self) -> char { BASE_CHARS[*self as usize] }
+}
+
+impl BaseLike for Base {
+  #[inline]
+  fn to_base(self) -> Base { self }
+  fn from_base(base: Base) -> Self { base }
+  fn from_base_pos(base: Base, _: usize) -> Self { base }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SourceBase(u32);
+
+impl BaseLike for SourceBase {
+  #[inline]
+  fn to_base(self) -> Base { Base::from_u8((self.0 & 3) as u8) }
+  fn from_base(base: Base) -> Self { SourceBase(base as u32) }
+  fn from_base_pos(base: Base, pos: usize) -> Self {
+    SourceBase(base as u32 | ((pos & 0xffffff) as u32) << 2)
+  }
+  fn protect(self, level: u8, out: &mut Vec<Self>) {
+    let mut esc = self.0 as i32 >> 26;
+    if esc > -31 {
+      esc = cmp::min(31, esc + level as i32);
+    }
+    let mask = (esc << 26) as u32 | (self.0 & ADDR_MASK);
+    SourceBase::push(self.to_base() as u8 + level, mask, out);
+  }
+  fn unprotect(self) -> Self {
+    let mut esc = self.0 as i32 >> 26;
+    if esc < 31 {
+      esc = cmp::max(-31, esc - 1 as i32);
+    }
+    let mask = (esc << 26) as u32 | (self.0 & ADDR_MASK);
+    let base = ((self.0 & 3) + 3) & 3;
+    SourceBase(mask | base)
+  }
+}
+
+const ADDR_MASK: u32 = 0xffffff << 2;
+
+impl SourceBase {
+  fn push(i: u8, mask: u32, out: &mut Vec<Self>) {
+    if i < 4 {
+      out.push(BaseLike::from_base(Base::from_u8(i)));
+    } else {
+      BaseLike::push(i - 4, out);
+      BaseLike::push(i - 3, out);
+    }
+  }
+}
+
+#[derive(Clone)]
+enum Node<T: Copy> { // Does it need to be BaseLike?
+  App(App<T>),
+  Leaf(Vec<T>),
+}
+
+impl<T: Copy> fmt::Debug for Node<T> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      Node::App(a) => {
+        write!(f, "(L{}{:?} R{}{:?})",
+               a.depth, a.unwrap_left(), a.depth, a.unwrap_right())
+      }
+      Node::Leaf(a) => write!(f, "(0#{})", a.len())
+    }
+  }
+}
+
+
+#[derive(Clone)]
+struct App<T: Copy> {
+  // Note: these are ~always present, except during rebalancing.
+  left: Option<Box<Node<T>>>,
+  right: Option<Box<Node<T>>>,
+  length: usize,
+  depth: i8,
+}
+
+#[derive(Debug)]
+struct Rope<T: Copy> {
+  node: Box<Node<T>>,
+  finger_index: Cell<usize>,
+  // NOTE: Use a raw pointer because we have no way to
+  // tie this lifetime to a borrow from inside the node.
+  // We must MANUALLY maintain the invariant that any time
+  // we mutate the node, we zero the finger. 
+  finger_leaf: Cell<*const Vec<T>>,
+}
+
+// Manual clone impl to avoid cloning finger_leaf!
+impl<T: Copy> Clone for Rope<T> {
+  fn clone(&self) -> Rope<T> { Rope::from_node(self.node.clone()) }
+}
+
+impl<T: Copy> App<T> {
+  #[inline]
+  fn take_children(&mut self) -> (Box<Node<T>>, Box<Node<T>>) {
+    (self.left.take().unwrap(), self.right.take().unwrap())
+  }
+
+  #[inline]
+  fn set_children(&mut self, left: Box<Node<T>>, right: Box<Node<T>>) {
+    self.depth = cmp::max(left.dep(), right.dep()) + 1;
+    self.length = left.len() + right.len();
+    self.left.insert(left);
+    self.right.insert(right);
+  }
+
+  #[inline]
+  fn unwrap_left(&self) -> &Node<T> {
+    self.left.as_ref().unwrap()
+  }
+
+  #[inline]
+  fn unwrap_right(&self) -> &Node<T> {
+    self.right.as_ref().unwrap()
+  } 
+}
+
+impl<T: Copy> Node<T> {
   fn dep(&self) -> i8 {
     match self {
-      Rope::Leaf(_) => 0,
-      Rope::App{depth, ..} => *depth,
-      Rope::Top(rope, ..) => rope.dep(),
+      Node::App(App{depth, ..}) => *depth,
+      Node::Leaf(..) => 0,
     }
   }
 
   fn len(&self) -> usize {
     match self {
-      Rope::Leaf(a) => a.len(),
-      Rope::App{length, ..} => *length,
-      Rope::Top(rope, ..) => rope.len(),
+      Node::App(App{length, ..}) => *length,
+      Node::Leaf(arr) => arr.len(),
     }
   }
 
-  fn fingeredAt(&self, index: usize, origIndex: usize, top: &Rope) -> Base {
+  fn at(&self, index: usize, orig: usize, parent: &Rope<T>) -> T {
     match self {
-      Rope::Leaf(a) => {
-        match top {
-          Rope::Top(_, ind, leaf) => {
-            ind.set(origIndex - index);
-            leaf.set(&**a);
-          }
-          default => {}
-        }
-        a[index]
-      }
-      Rope::App{left, right, ..} => {
-        let l = left.len();
-        if index < l {
-          left.fingeredAt(index, origIndex, top)
+      Node::App(a) => {
+        let left = a.unwrap_left();
+        let len = left.len();
+        if index < len {
+          left.at(index, orig, parent)
         } else {
-          right.fingeredAt(index - l, origIndex, top)
+          a.unwrap_right().at(index - len, orig, parent)
         }
+      },
+      Node::Leaf(arr) => {
+        // TODO - range checking?
+        parent.finger_index.set(orig - index);
+        parent.finger_leaf.set(&*arr);
+        arr[index]
       }
-      Rope::Top(rope, ..) => {
-        rope.fingeredAt(index, origIndex, top)
-      }
-    }
-  }
-
-  fn at(&self, index: usize) -> Base {
-    self.fingeredAt(index, index, self)
+    }     
   }
 
   #[inline]
-  fn unsafe_left(&self) -> &Rope {
+  fn unwrap_app(&self) -> &App<T> {
     match self {
-      Rope::App{left, ..} => left,
-      Rope::Top(rope, ..) => rope.unsafe_left(),
-      default => panic!("Expected an App"),
+      Node::App(a) => a,
+      _ => panic!("Expected an App"),
     }
   }
 
   #[inline]
-  fn unsafe_right(&self) -> &Rope {
+  fn unwrap_mut_app(&mut self) -> &mut App<T> {
     match self {
-      Rope::App{right, ..} => right,
-      Rope::Top(rope, ..) => rope.unsafe_right(),
-      default => panic!("Expected an App"),
+      Node::App(a) => a,
+      _ => panic!("Expected an App"),
     }
   }
 
-  fn balance(&self) -> Rope {
-    match self {
-      Rope::Leaf(..) => self.clone(),
-      Rope::App{left, right, ..} => {
-        let dl = left.dep();
-        let dr = right.dep();
-        if (dl - dr).abs() <= 1 {
-          return self.clone();
+  // #[inline]
+  // fn unwrap_app(&mut self) -> &mut App {
+  //   match self {
+  //     Node::App(a) => a,
+  //     default => panic!("Expected an App"),
+  //   }
+  // }
+
+  #[inline]
+  fn take_children(&mut self) -> (Box<Node<T>>, Box<Node<T>>) {
+    self.unwrap_mut_app().take_children()
+  }
+
+  #[inline]
+  fn set_children(&mut self, left: Box<Node<T>>, right: Box<Node<T>>) {
+    self.unwrap_mut_app().set_children(left, right);
+  }
+
+  fn rebalance(&mut self) {
+    // Here's where things get real.
+    // Should we move this into join?  We want to be able to
+    // do a simple rebalancing after splicing in/out data.
+    // Moving to join would make it more of a persistent deal?
+    // Maybe we need to write splice?
+    if let Node::Leaf(..) = self { return; }
+    loop {
+      let app = self.unwrap_mut_app();
+      if app.length < THRESHOLD {
+        *self = Node::Leaf(self.to_vec());
+        return;
+      }
+      let dl = app.unwrap_left().dep();
+      let dr = app.unwrap_right().dep();
+      if (dl - dr).abs() <= 1 { return; }
+      if dl > dr { // taller left
+        let (mut l, r) = app.take_children();
+        let (ll, mut lr) = l.take_children();
+        if lr.dep() > ll.dep() { // tall middle
+          let (lrl, lrr) = lr.take_children();
+          l.set_children(ll, lrl);
+          lr.set_children(lrr, r);
+          lr.rebalance();
+          app.set_children(l, lr);
+        } else { // left-skewed: simple rotate
+          l.set_children(lr, r);
+          l.rebalance();
+          app.set_children(ll, l);
         }
-        if dl > dr {
-          // left taller
-          let ll = left.unsafe_left();
-          let lr = left.unsafe_right();
-          if lr.dep() > ll.dep() {
-            // Need to figure out ownership here...!
-            join(join(ll, lr.unsafe_left()),
-                 join(lr.unsafe_right(), right))
-          } else {
-            join(ll, join(lr, right))
-          }
-        } else {
-          // right taller
-          let rl = right.unsafe_left();
-          let rr = right.unsafe_right();
-          if rl.dep() > rr.dep() {
-            join(join(left, rl.unsafe_left()),
-                 join(rl.unsafe_right(), rr))
-          } else {
-            join(join(left, rl), rr)
-          }
+      } else { // taller right
+        let (l, mut r) = app.take_children();
+        let (mut rl, rr) = r.take_children();
+        if rl.dep() > rr.dep() { // tall middle
+          let (rll, rlr) = rl.take_children();
+          r.set_children(rlr, rr);
+          rl.set_children(l, rll);
+          rl.rebalance();
+          app.set_children(rl, r);
+        } else { // right-skewed: simple rotate
+          r.set_children(l, rl);
+          r.rebalance();
+          app.set_children(r, rr);
         }
       }
-      Rope::Top(rope, i, l) => panic!("top inside balance")
     }
   }
 
-  fn toLeaf(&self) -> Rope {
+  fn check_balance(&self) -> bool {
     match self {
-      Rope::Leaf(a) => self,
-      Rope::Top(rope, ..) => rope.toLeaf(),
-      Rope::App(left, right, ..) => {
-        let l = left.len();
-        let r = right.len();
-        let mut buf = Vec::with_capacity(l + r);
-        let mut stack: Vec<&Rope> = Vec::new();
-        let mut index: usize = 0;
-        stack.push(right);
-        stack.push(left);
-        while stack.len() > 0 {
-          match stack.pop().unwrap() {
-            Rope::Top(rope) => {
-              stack.push(rope);
-            }
-            Rope::Leaf(arr) => {
-              let a = arr.len();
-              buf[index .. index + l].copy_from_slice(arr);
-              index += l;
-            }
-            Rope::App{left, right, ..} => {
-              stack.push(&*right);
-              stack.push(&*left);
-            }
-          }
+      Node::Leaf(..) => true,
+      Node::App(a) => {
+        let bf = a.unwrap_left().dep() - a.unwrap_right().dep();
+        if bf.abs() > 1 {
+          println!("Bad balance: {} {:#?}", bf, self);
+          return false;
         }
-        Rope::Leaf(buf.into())
+        a.unwrap_left().check_balance() && a.unwrap_right().check_balance()
       }
     }
+  }
+
+  fn to_vec(&self) -> Vec<T> {
+    let len = self.len();
+    let mut vec = Vec::with_capacity(len);
+    unsafe { vec.set_len(len); } // initialized below
+    let mut stack = vec![self];
+    let mut index: usize = 0;
+    while let Some(top) = stack.pop() {
+      match top {
+        Node::Leaf(a) => {
+          let l = a.len();
+          vec[index .. index + l].copy_from_slice(a);
+          index += l;
+        }
+        Node::App(a) => {
+          stack.push(a.unwrap_right());
+          stack.push(a.unwrap_left());
+        }
+      }
+    }
+    return vec;
+  }
+
+  // Takes ownership of both, so we can just concat the nodes
+  fn join(left: Box<Node<T>>, right: Box<Node<T>>) -> Box<Node<T>> {
+    // NOTE: assume that nodes are balanced on the way in
+    if left.len() == 0 {
+      return right;
+    } else if right.len() == 0 {
+      return left;
+    }
+    let depth = cmp::max(left.dep(), right.dep()) + 1;
+    let length = left.len() + right.len();
+    let app = App{left: Some(left), right: Some(right), depth, length};
+    let mut node = Node::App(app);
+    node.rebalance();
+    Box::new(node)
+  }
+
+  fn splice(&mut self, start: usize, length: usize, insert: Option<Vec<T>>) {
+    panic!("not implemented");
   }
 }
 
-// impl Copy for Rope {
-//     #[inline]
-//     fn copy(&self) -> Rope {
-//         match self {
-//             Rope::Leaf(arr) => Rope::Leaf(arr.clone()),
-//             Rope::App({left, right, length, depth}) =>
-//                 Rope::App({left: left.clone(), right: right.clone(), length, depth}),
-//         }
-//     }
-// }
 
-
-
-fn join(mut left: &Rope, mut right: &Rope) -> Rope {
-  let l = left.len();
-  let r = right.len();
-  if l == 0 { return right.clone(); }
-  if r == 0 { return left.clone(); }
-  if l + r < THRESHOLD {
+impl<T: Copy> Rope<T> {
+  #[inline]
+  pub fn len(&self) -> usize {
+    self.node.len()
   }
-  // TODO - balance height
-  let mut dl = left.dep();
-  let mut dr = right.dep();
-  while dl - dr > 1 || dr - dl > 1 {
-    if dl > dr {
-      let ll = left.unsafe_left();
-      let lr = left.unsafe_right();
-      if lr.dep() > ll.dep() {
-        // Problem - left/right want refs... who owns lifetime?
-        left = join(ll, lr.unsafe_left());
-        dl = left.dep();
-        right = join(lr.unsafe_right(), right);
-        dr = right.dep();
-      } else {
-        dl = (left = ll).dep();
-        dr = (right = join(lr, right)).dep();
-      }
-    } else {
-      panic!();
-      
-    }
 
+  pub fn splice(&mut self, start: usize, length: usize, insert: Option<Vec<T>>) {
+    // Mutating operation requires nulling out the finger.
+    self.node.splice(start, length, insert);
+    self.finger_index.set(0);
+    self.finger_leaf.set(ptr::null());
   }
-  panic!();
-}
 
-fn rope(s: &str) -> Rope {
-  let mut vec = Vec::new();
-  for c in s.chars() {
-    vec.push(match c {
-      'I' => Base::I,
-      'C' => Base::C,
-      'F' => Base::F,
-      'P' => Base::P,
-      _ => Base::I, // panic?
-    })
-  }
-  //let slice: [Base] = &vec;
-  Rope::Leaf(vec.into())
-}
-
-fn rope_str(r: &Rope) -> String {
-  let mut buf = String::with_capacity(r.len());
-  let mut stack: Vec<&Rope> = Vec::new();
-  stack.push(r);
-  while stack.len() > 0 {
-    match stack.pop().unwrap() {
-      Rope::Leaf(arr) => {
-        for base in arr.iter() {
-          match base {
-            Base::I => buf.push('I'),
-            Base::C => buf.push('C'),
-            Base::F => buf.push('F'),
-            Base::P => buf.push('P'),
-          }
+  // Range check and -> Option<Base> ?
+  pub fn at(&self, index: usize) -> T {
+    let leaf = self.finger_leaf.get();
+    if !leaf.is_null() {
+      let finger = self.finger_index.get();
+      unsafe {
+        if index >= finger && index < finger + (*leaf).len() {
+          return (*leaf)[index - finger];
         }
       }
-      Rope::App{left, right, ..} => {
-        stack.push(&*right);
-        stack.push(&*left);
+    }
+    self.node.at(index, index, self)
+  }
+
+  fn from_node(node: Box<Node<T>>) -> Rope<T> {
+    Rope{node,
+         finger_index: Cell::new(0),
+         finger_leaf: Cell::new(ptr::null())}
+  }
+
+  pub fn join(left: Rope<T>, right: Rope<T>) -> Rope<T> {
+    Rope::from_node(Node::join(left.node, right.node))
+  }
+}
+
+impl<T: BaseLike> Rope<T> {
+  fn from_bases(s: &str) -> Rope<T> {
+    let mut vec = Vec::new();
+    let mut i = 0;
+    for c in s.chars() {
+      vec.push(match c {
+        'I' => BaseLike::from_base_pos(Base::I, i),
+        'C' => BaseLike::from_base_pos(Base::C, i),
+        'F' => BaseLike::from_base_pos(Base::F, i),
+        'P' => BaseLike::from_base_pos(Base::P, i),
+        _ => panic!("Bad base {}", c),
+      });
+      i += 1; 
+    }
+    //let slice: [Base] = &vec;
+    Rope::from_node(Box::new(Node::Leaf(vec.into())))
+  }
+
+  fn base_str(&self) -> String {
+    let mut buf = String::with_capacity(self.len());
+    let mut stack: Vec<&Node<T>> = vec![&self.node];
+    while stack.len() > 0 {
+      match stack.pop().unwrap() {
+        Node::Leaf(arr) => {
+          for base in arr.iter() {
+            match base.to_base() {
+              Base::I => buf.push('I'),
+              Base::C => buf.push('C'),
+              Base::F => buf.push('F'),
+              Base::P => buf.push('P'),
+            }
+          }
+        }
+        Node::App(a) => {
+          stack.push(a.unwrap_right());
+          stack.push(a.unwrap_left());
+        }
       }
     }
+    buf
   }
-  buf
 }
