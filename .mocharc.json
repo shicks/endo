@@ -1,1 +1,1 @@
-{"require": "test/mocha.env"}
+{"require": "ts/testing/mocha.env"}

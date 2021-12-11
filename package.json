@@ -4,9 +4,9 @@
   "description": "Browser-based VM for the 2007 ICFP contest \"Save Endo\"",
   "main": "index.js",
   "scripts": {
-    "test": "node_modules/esbuild/bin/esbuild --bundle --outdir=dist/test --platform=node --sourcemap=inline test/*_test.ts && node_modules/mocha/bin/mocha dist/test/*_test.js",
-    "build": "node_modules/esbuild/bin/esbuild --bundle --outfile=dist/bin/dna.js --platform=node --sourcemap=inline src/maindna.ts && node_modules/esbuild/bin/esbuild --bundle --outfile=dist/bin/rna.js --platform=node --sourcemap=inline src/mainrna.ts",
-    "web": "node_modules/esbuild/bin/esbuild --watch --bundle --outfile=public/dist/bundle.js --sourcemap=inline src/web.ts & (cd public; http-server -p 8080)"
+    "test": "node_modules/esbuild/bin/esbuild --bundle --outdir=dist/test --platform=node --sourcemap=inline ts/*_test.ts && node_modules/mocha/bin/mocha dist/test/*_test.js",
+    "build": "node_modules/esbuild/bin/esbuild --bundle --outfile=dist/bin/dna.js --platform=node --sourcemap=inline ts/maindna.ts && node_modules/esbuild/bin/esbuild --bundle --outfile=dist/bin/rna.js --platform=node --sourcemap=inline ts/mainrna.ts",
+    "web": "node_modules/esbuild/bin/esbuild --watch --bundle --outfile=public/dist/bundle.js --sourcemap=inline ts/web.ts & (cd public; http-server -p 8080)"
   },
   "author": "",
   "license": "ISC",
