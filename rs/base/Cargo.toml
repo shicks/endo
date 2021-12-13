@@ -1,0 +1,13 @@
+[package]
+name = "base"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "base"
+path = "./lib.rs"
+
+[dev-dependencies]
+itertools = "0.10.2"
+quickcheck = "1"
+quickcheck_macros = "1"

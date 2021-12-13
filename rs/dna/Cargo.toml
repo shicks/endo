@@ -1,0 +1,18 @@
+[package]
+name = "dna"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dna"
+path = "./lib.rs"
+
+[[bin]]
+name = "dna"
+path = "./bin.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rope = {path = "../rope"}
+base = {path = "../base"}
