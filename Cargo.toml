@@ -1,0 +1,17 @@
+[package]
+name = "endo"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rope"
+path = "rs/rope/lib.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[dev-dependencies]
+itertools = "0.10.2"
+quickcheck = "1"
+quickcheck_macros = "1"

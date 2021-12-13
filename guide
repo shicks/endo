@@ -1,0 +1,17 @@
+#!/usr/bin/perl
+
+# IIP IFF CPICFPPIC IIC *CC* IIC IPPP *CF* IIC
+# (   ?   IFP CFFP  )   *II* end <0>0 *IC* end
+
+while (@ARGV) {
+  my $i = shift;
+  my $bin = sprintf('%b', $i);
+  $bin = reverse $bin;
+  $bin =~ y/01/CF/;
+  $orig = $bin;
+  $orig =~ y/F/C/;
+  my $prefix = "IIPIFFCPICFPPICIIC${orig}IICIPPP${bin}IIC";
+  my $title = sprintf('guide-%04d', $i);
+  system('./run', $title, $prefix);
+}
+

@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Usage: run title prefix
+# Outputs:
+#  - pages/title.dna: DNA prefix
+#  - pages/title.rna: RNA output
+#  - pages/title.png: rendered image
+# Note: does not rebuild - `npm run build` first if needed
+
+title=$1
+prefix=$2
+
+echo $prefix > pages/$title.dna
+time node dist/bin/dna $prefix |
+     tee pages/$title.rna |
+     node dist/bin/rna -o pages/$title.png
+gzip pages/$title.rna
