@@ -309,7 +309,7 @@ impl<'a, T: Copy> Iterator for RopeCursor<'a, T> {
 
 
 #[cfg(test)]
-mod tests {
+mod rope_tests {
   use super::*;
   use itertools::assert_equal;
   use quickcheck_macros::quickcheck;

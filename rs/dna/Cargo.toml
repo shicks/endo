@@ -16,3 +16,7 @@ path = "./bin.rs"
 [dependencies]
 rope = {path = "../rope"}
 base = {path = "../base"}
+
+[dev-dependencies]
+quickcheck = "1"
+quickcheck_macros = "1"
