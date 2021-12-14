@@ -2,6 +2,40 @@ use std::cmp::max;
 use rope::*;
 use base::BaseLike;
 
+pub struct Emit<T: BaseLike> {
+  rna: [T; 7],
+}
+
+// SourceMap:
+//  - keep track of when a base is used as a PItem, a TItem, an Emit,
+//    matches a PItem, etc; and also the escape level.
+//  - map back to original address...?
+//  - output: 00000  III PIIPIIP   0  emit PIIPIIP     [0,0]
+//            00010  IF            0  (
+//            00012  CPFIC        -1  IFCP
+//            00017  IIC           0  )
+//            00020  IIC           0  endpat
+//            ...
+//            00100  IF IICICCIP   0  !2398
+//
+// We're gonna end up with mixed-and-matched numbers on different skip
+// bases, inserted from various places... how to represent this?
+
+pub enum PItem<T: BaseLike> {
+  Base(T),
+  // Also stores the index where we found it, for debugging...?
+  Skip(usize, usize),
+  Search(Vec<T>, usize),
+}
+
+pub fn pattern<T: BaseLike>(cursor: &mut RopeCursor<T>) -> (Vec<PItem<T>>, Vec<Emit<T>>) {
+  panic!("not implemented!")
+}
+
+
+
+
+
 fn find<T: BaseLike>(r: &Rope<T>, needle: &[T], start: usize) -> Option<usize> {
   let needle_len = needle.len();
   if needle_len == 0 { return Some(start); }
