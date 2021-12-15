@@ -236,21 +236,54 @@ pub struct RopeCursor<'a, T: Copy> {
 }
 
 impl<'a, T: Copy> RopeCursor<'a, T> {
+  #[inline]
   fn new(root: &'a Rope<T>) -> Self {
     RopeCursor{root, stack: vec![root], start: 0, index: 0, leaf: None}
   }
 
+  #[inline]
+  pub fn full_len(&self) -> usize {
+    self.root.len()
+  }
+
+  #[inline]
+  pub fn at_end(&self) -> bool {
+    self.index >= self.full_len()
+  }
+
+  #[inline]
   pub fn pos(&self) -> usize {
     self.index
   }
 
+  #[inline]
   pub fn seek(&mut self, pos: usize) {
     self.index = pos;
   }
 
+  #[inline]
+  pub fn skip(&mut self, delta: isize) {
+    self.index = (self.index as isize + delta) as usize;
+  }
+
+  #[inline]
+  pub fn peek(&mut self) -> Option<T> {
+    if self.index < self.root.len() {
+      Some(self.at(self.index))
+    } else {
+      None
+    }
+  }
+
+  #[inline]
   pub fn at(&mut self, pos: usize) -> T {
     self.seek_internal(pos);
     self.leaf.unwrap()[pos - self.start]
+  }
+
+  #[inline]
+  pub fn try_at(&mut self, pos: usize) -> Option<T> {
+    if !self.at_end() { Some(self.at(pos)) } else { None }
   }
 
   fn seek_internal(&mut self, mut pos: usize) {
