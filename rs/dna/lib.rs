@@ -484,30 +484,86 @@ fn match_replace<T: BaseLike>(dna: &mut Rope<T>, pat: &[PItem<T>],
   // TODO - factor out a find_splice_points() function here so we can
   // test it separately!
 
-  let mut splice_points: Vec<(usize, usize)> = vec![];
-  for (i, t) in tpl.iter().enumerate() {
-    if let Some(cur) = t.as_unprotected_group() {
-      let mut cur = cur as isize;
-      // is this a valid splice point? i.e. does it overlap with previous end?
-      if (cur as usize) < env.groups.len() {
-        let g1 = env.groups[cur as usize];
-        while let Some(last) = splice_points.pop() {
-          let g0 = env.groups[last.1];
-          if g0.1 <= g1.0 || g0.1 - g0.0 > g1.1 - g1.0 {
-            // If there's no overlap or the existing one is bigger, put it back
-            splice_points.push(last);
-            cur = -1;
-            break;
-          }
-        }
-        if cur >= 0 {
-          splice_points.push((i, cur as usize));
-        }
+  // let mut splice_points: Vec<(usize, usize)> = vec![];
+  // for (i, t) in tpl.iter().enumerate() {
+  //   if let Some(cur) = t.as_unprotected_group() {
+  //     let mut cur = cur as isize;
+  //     // is this a valid splice point? i.e. does it overlap with previous end?
+  //     if (cur as usize) < env.groups.len() {
+  //       let g1 = env.groups[cur as usize];
+  //       while let Some(last) = splice_points.pop() {
+  //         let g0 = env.groups[last.1];
+  //         if g0.1 <= g1.0 || g0.1 - g0.0 > g1.1 - g1.0 {
+  //           // If there's no overlap or the existing one is bigger, put it back
+  //           splice_points.push(last);
+  //           cur = -1;
+  //           break;
+  //         }
+  //       }
+  //       if cur >= 0 {
+  //         splice_points.push((i, cur as usize));
+  //       }
+  //     }
+  //   }
+  // }
+
+  let env = env.groups;
+  let splice_plan = find_splice(tpl, &env, (0, cursor.pos()));
+  let splices = splice_plan.iter()
+    .map(|(r, t)| {
+      let mut v: Vec<T> = Vec::new();
+      for item in *t {
+        item.expand(&mut v, &env, &mut cursor);
       }
-    }
+      (r, v)
+    }).collect::<Vec<_>>();
+  for ((start, end), bases) in splices {
+    let insert = if bases.len() > 0 { Some(bases) } else { None };
+    dna.splice(*start, end - start, insert);
   }
 }
 
+
+type Rng = (usize, usize);
+fn find_splice<'a, T: BaseLike>(tpl: &'a [TItem<T>], env: &[Rng], range: Rng)
+                                -> Vec<(Rng, &'a [TItem<T>])> {
+  let unprotected: Vec<(usize, Rng)> =
+    tpl.iter().enumerate().filter_map(|(i, x)| {
+      x.as_unprotected_group().and_then(|g| {
+        if g < env.len() {
+          Some((i, env[g]))
+        } else {
+          None
+        }
+      })
+    }).collect();
+  
+  fn internal<'a, T: BaseLike>(rest: &[(usize, Rng)], range: Rng,
+              tpl: &'a [TItem<T>], out: &mut Vec<(Rng, &'a [TItem<T>])>) {
+    // find the max in rest
+    let rest: Vec<(usize, Rng)> =
+        rest.iter().filter(|(_, r)| r.0 >= range.0 && r.1 <= range.1)
+        .map(|x| *x).collect();
+    let option_i = rest.iter().enumerate().max_by_key(|(_, (_, r))| r.1 - r.0);
+
+    if let Some((i1, (i2, r))) = option_i {
+      // split at i
+      internal(&rest[i1 + 1 ..], (r.1, range.1), &tpl[i2 + 1 ..], out);
+      internal(&rest[.. i1], (range.0, r.0), &tpl[.. *i2], out);
+    } else {
+      out.push((range, tpl));
+    }
+  }
+  let mut out: Vec<(Rng, &'a [TItem<T>])> = Vec::new();
+  internal(&unprotected, range, &tpl, &mut out);
+  
+  //out.reverse();
+  out
+
+  // This gives the "splice plan" - next, expand all the templates
+  // BEFORE doing any splicing so as to not mess up the refs, then
+  // splice everything RIGHT TO LEFT to keep indexes correct.
+}
 
 
 fn find<T: BaseLike, S: BaseLike>(haystack: &mut RopeCursor<T>, needle: &[S], start: usize) -> Option<usize> {
