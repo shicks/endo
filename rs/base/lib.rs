@@ -3,7 +3,7 @@ use std::fmt;
 use std::mem;
 use std::marker::PhantomData;
 
-pub trait BaseLike: Copy + PartialEq + fmt::Display {
+pub trait BaseLike: Copy + PartialEq + fmt::Display + fmt::Debug {
   fn to_base(self) -> Base;
   fn to_u2(self) -> u8 { self.to_base() as u8 }
   fn from_base(base: Base) -> Self;
@@ -24,10 +24,6 @@ pub trait BaseLike: Copy + PartialEq + fmt::Display {
     // NOTE: for IC -> P, unprotect the I, not the C.
     BaseLike::from_base(Base::from_u8(self.to_base() as u8 + 3))
   }
-  fn slice_to_string(v: &[Self]) -> String {
-    v.iter().map(|x| x.to_base().char()).collect()
-  }
-
   fn collect<C: FromIterator<Self>>(s: &str) -> C {
     BaseLikeIterator{s: s.as_bytes(), i: 0, pos: 0, phantom: PhantomData}
         .collect::<C>()

@@ -19,6 +19,12 @@ use base::{Base, BaseLike, Join};
 // We're gonna end up with mixed-and-matched numbers on different skip
 // bases, inserted from various places... how to represent this?
 
+type Rna<T> = [T;7];
+
+fn str<T: BaseLike>(dna: &Rope<T>) -> String {
+  dna.iter().map(|b| format!("{}", b)).collect::<String>()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum PItem<T: BaseLike> {
   Bases(Vec<T>),
@@ -79,8 +85,8 @@ impl<T: BaseLike> Pattern<T> for PItem<T> {
         }
       }
       PItem::Skip(i) => {
+        if cursor.pos() + i > cursor.full_len() { return false; }
         cursor.skip(*i as isize);
-        if cursor.at_end() { return false; }
       }
       PItem::Search(bs, ..) => {
         match find(cursor, &bs, cursor.pos()) {
@@ -327,8 +333,13 @@ impl<T: BaseLike> Bases<T> for Vec<T> {
 }
 
 pub trait State<T: BaseLike> {
-  fn rna(&mut self, cursor: &mut RopeCursor<T>);
+  fn new() -> Self;
+
+  fn emit(&mut self, cursor: &mut RopeCursor<T>);
   fn finish(&mut self);
+
+  fn finished(&self) -> bool;
+  fn rna(&self) -> &[Rna<T>];
 
   #[inline]
   fn or_finish<U>(&mut self, o: Option<U>) -> Option<U> {
@@ -339,17 +350,14 @@ pub trait State<T: BaseLike> {
 
 pub struct DnaState<T: BaseLike> {
   finished: bool,
-  rna: Vec<[T;7]>,
-}
-
-impl<T: BaseLike> DnaState<T> {
-  pub fn new() -> Self {
-    DnaState{finished: false, rna: Vec::new()}
-  }
+  rna: Vec<Rna<T>>,
 }
 
 impl<T: BaseLike> State<T> for DnaState<T> {
-  fn rna(&mut self, c: &mut RopeCursor<T>) {
+  fn new() -> Self {
+    DnaState{finished: false, rna: Vec::new()}
+  }
+  fn emit(&mut self, c: &mut RopeCursor<T>) {
     let i = c.pos() + 3;
     c.skip(10);
     if c.at_end() { return; }
@@ -358,6 +366,12 @@ impl<T: BaseLike> State<T> for DnaState<T> {
   }
   fn finish(&mut self) {
     self.finished = true;
+  }
+  fn finished(&self) -> bool {
+    self.finished
+  }
+  fn rna(&self) -> &[Rna<T>] {
+    &self.rna
   }
 }
 
@@ -396,7 +410,7 @@ pub trait Pattern<T: BaseLike>: Sized {
         Some(Self::make_open(cursor))
       }
       OpCode::III => {
-        state.rna(cursor);
+        state.emit(cursor);
         Self::parse_item(cursor, depth, state)
       }
     }
@@ -447,7 +461,7 @@ pub trait Template<T: BaseLike>: Sized {
         state.or_finish(Self::make_len(cursor))
       }
       OpCode::III => {
-        state.rna(cursor);
+        state.emit(cursor);
         Self::parse_item(cursor, state)
       }
     }
@@ -464,6 +478,20 @@ pub trait Template<T: BaseLike>: Sized {
 }
 
 
+fn iterate<B: BaseLike, S: State<B>>(dna: &mut Rope<B>, state: &mut S) {
+  // TODO - find a way to parametrize on Pattern and Template.
+println!("Iterate: {}", str(&dna));
+  let mut cursor = dna.cursor();
+  let pat = PItem::parse(&mut cursor, state);
+  if state.finished() { return; }
+println!("Pat: {}", Join(&pat, " "));
+  let tpl = TItem::parse(&mut cursor, state);
+  if state.finished() { return; }
+println!("Tpl: {}", Join(&tpl, " "));
+  let start = cursor.pos();
+  match_replace(dna, &pat, &tpl, start);
+}
+
 fn match_replace<T: BaseLike>(dna: &mut Rope<T>, pat: &[PItem<T>],
                               tpl: &[TItem<T>], start: usize) {
   let mut cursor = dna.cursor();
@@ -472,6 +500,7 @@ fn match_replace<T: BaseLike>(dna: &mut Rope<T>, pat: &[PItem<T>],
   for p in pat {
     if !p.exec(&mut cursor, &mut env) {
       dna.splice(0, start, None);
+println!("No match: splicing to {}", str(&dna));
       return;
     }
   }
@@ -517,6 +546,7 @@ fn match_replace<T: BaseLike>(dna: &mut Rope<T>, pat: &[PItem<T>],
       }
       (r, v)
     }).collect::<Vec<_>>();
+println!("Splices: {:?}", splices);
   for ((start, end), bases) in splices {
     let insert = if bases.len() > 0 { Some(bases) } else { None };
     dna.splice(*start, end - start, insert);
@@ -675,7 +705,7 @@ mod dna_tests {
   }
 
   #[test]
-  fn parse_pattern1() {
+  fn parse_pattern_1() {
     let dna = SourceBase::collect::<Rope<_>>("CIIC");
     let mut state = DnaState::<SourceBase>::new();
     let mut c = dna.cursor();
@@ -689,7 +719,7 @@ mod dna_tests {
   }
 
   #[test]
-  fn parse_pattern2() {
+  fn parse_pattern_2() {
     let dna = Base::collect::<Rope<_>>("IIPIPICPIICICIIF");
     let mut state = DnaState::<Base>::new();
     let mut c = dna.cursor();
@@ -700,5 +730,29 @@ mod dna_tests {
     assert_eq!(c.pos(), c.full_len());
     assert_eq!(state.finished, false);
     assert_eq!(state.rna, Vec::<[Base;7]>::new());
+  }
+
+  #[test]
+  fn full_iteration_1() {
+    let mut dna = Base::collect::<Rope<_>>("IIPIPICPIICICIIFICCIFPPIICCFPC");
+    let mut state = DnaState::new();
+    iterate(&mut dna, &mut state);
+    assert_eq!(&str(&dna), "PICFC");
+  }
+
+  // #[test]
+  // fn full_iteration_2() {
+  //   let mut dna = Base::collect::<Rope<_>>("IIPIPICPIICICIIFICCIFCCCPPIICCFPC");
+  //   let mut state = DnaState::new();
+  //   iterate(&mut dna, &mut state);
+  //   assert_eq!(&str(&dna), "PIICCFCFFPC");
+  // }
+
+  #[test]
+  fn full_iteration_3() {
+    let mut dna = Base::collect::<Rope<_>>("IIPIPIICPIICIICCIICFCFC");
+    let mut state = DnaState::new();
+    iterate(&mut dna, &mut state);
+    assert_eq!(&str(&dna), "I");
   }
 }
