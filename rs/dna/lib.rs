@@ -1,10 +1,8 @@
 use std::cmp::max;
+use std::fmt;
+use std::str::FromStr;
 use rope::*;
-use base::{Base, BaseLike};
-
-pub struct Emit<T: BaseLike> {
-  rna: [T; 7],
-}
+use base::{Base, BaseLike, Join};
 
 // SourceMap:
 //  - keep track of when a base is used as a PItem, a TItem, an Emit,
@@ -21,13 +19,47 @@ pub struct Emit<T: BaseLike> {
 // We're gonna end up with mixed-and-matched numbers on different skip
 // bases, inserted from various places... how to represent this?
 
+#[derive(Clone, Debug, PartialEq)]
 pub enum PItem<T: BaseLike> {
   Bases(Vec<T>),
   // Also stores the index where we found it, for debugging...?
-  Skip(u32),
+  Skip(usize),
   Search(Vec<T>),
   OpenGroup,
   CloseGroup,
+}
+
+impl<T: BaseLike> fmt::Display for PItem<T> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      PItem::Bases(v) => write!(f, "{}", Join(v, "")),
+      PItem::Skip(i) => write!(f, "!{}", i),
+      PItem::Search(v) => write!(f, "?<{}>", Join(v, "")),
+      PItem::OpenGroup => write!(f, "("),
+      PItem::CloseGroup => write!(f, ")"),
+    }
+  }
+}
+
+impl<T: BaseLike> FromStr for PItem<T> {
+  type Err = ();
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    let v = s.as_bytes();
+    match (v[0], v.len()) {
+      (b'(', 1) => Ok(PItem::OpenGroup),
+      (b')', 1) => Ok(PItem::CloseGroup),
+      (b'I', ..)|(b'C', ..)|(b'F', ..)|(b'P', ..) => {
+        Ok(PItem::Bases(T::collect(s)))
+      }
+      (b'!', _) => match s[1..].parse::<usize>() {
+        Ok(i) => Ok(PItem::Skip(i)),
+        Err(_) => Err(()),
+      },
+      (b'?', _) if v[1] == b'<' && v[v.len() - 1] == b'>' =>
+          Ok(PItem::Search(T::collect(&s[2..(v.len()-1)]))),
+      _ => Err(()),
+    }
+  }
 }
 
 impl<T: BaseLike> Pattern<T> for PItem<T> {
@@ -66,7 +98,7 @@ impl<T: BaseLike> Pattern<T> for PItem<T> {
 
   fn make_skip(cursor: &mut RopeCursor<T>) -> Option<Self> {
     cursor.skip(2);
-    u32::parse(cursor).map(PItem::Skip)
+    usize::parse(cursor).map(PItem::Skip)
   }
 
   fn make_search(cursor: &mut RopeCursor<T>) -> Self {
@@ -86,17 +118,92 @@ impl<T: BaseLike> Pattern<T> for PItem<T> {
 }
 
 
+#[derive(Clone, Debug, PartialEq)]
 pub enum TItem<T: BaseLike> {
   Bases(Vec<T>),
   // Also stores the index where we found it, for debugging...?
-  Len(u32),
-  Ref{group: u32, level: u32},
+  Len(usize),
+  Ref{group: usize, level: usize},
+}
+
+impl<T: BaseLike> fmt::Display for TItem<T> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      TItem::Bases(v) => write!(f, "{}", Join(v, "")),
+      TItem::Len(i) => write!(f, "|{}|", i),
+      TItem::Ref{group, level} =>
+          write!(f, "${}{}", "\\".repeat(*level as usize), group)
+    }
+  }
+}
+
+impl<T: BaseLike> FromStr for TItem<T> {
+  type Err = ();
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    let v = s.as_bytes();
+    match (v[0], v.len()) {
+      (b'I', ..)|(b'C', ..)|(b'F', ..)|(b'P', ..) => {
+        Ok(TItem::Bases(T::collect(s)))
+      }
+      (b'|', _) if v[v.len() - 1] == b'|' => {
+        match s[1..v.len()-1].parse::<usize>() {
+          Ok(i) => Ok(TItem::Len(i)),
+          Err(_) => Err(()),
+        }
+      },
+      (b'$', _) => {
+        let mut level: usize = 0;
+        while v[1 + level as usize] == b'\\' {
+          level += 1;
+        }
+        match s[level as usize..].parse::<usize>() {
+          Ok(group) => Ok(TItem::Ref{group, level}),
+          Err(_) => Err(()),
+        }
+      },
+      _ => Err(()),
+    }
+  }
+}
+
+fn as_nat<T: BaseLike>(mut i: usize) -> Vec<T> {
+  let mut v = vec![T::from_base(Base::P)];
+  while i > 0 {
+    // TODO - keep address from op, set level to -32
+    v.push(match i & 1 {
+      0 => T::from_base(Base::I),
+      1 => T::from_base(Base::C),
+      _ => unreachable!(),
+    });
+    i >>= 1;    
+  }
+  v.reverse();
+  v
 }
 
 impl<T: BaseLike> Template<T> for TItem<T> {
-  fn expand(&self, vec: &mut Vec<T>, env: &[(usize, usize)],
+  fn expand(&self, out: &mut Vec<T>, env: &[(usize, usize)],
             cursor: &mut RopeCursor<T>) {
-    panic!()
+    match self {
+      TItem::Bases(v) => {
+        out.extend(v);
+      }
+      TItem::Len(i) => {
+        if *i < env.len() {
+          out.extend(as_nat::<T>(env[*i].1 - env[*i].0));
+        } else {
+          out.push(T::from_base(Base::P));
+        }
+      }
+      TItem::Ref{group, level} => {
+        if *group < env.len() {
+          let i = env[*group].0;
+          while i < env[*group].1 {
+            cursor.at(i).protect(*level as u8, out);
+          }
+        }
+      }
+    }
   }
 
   // This is necessary for finding splice points.
@@ -114,13 +221,13 @@ impl<T: BaseLike> Template<T> for TItem<T> {
 
   fn make_len(cursor: &mut RopeCursor<T>) -> Option<Self> {
     cursor.skip(3);
-    u32::parse(cursor).map(TItem::Len)
+    usize::parse(cursor).map(TItem::Len)
   }
 
   fn make_ref(cursor: &mut RopeCursor<T>) -> Option<Self> {
     cursor.skip(2);
-    if let Some(level) = u32::parse(cursor) {
-      if let Some(group) = u32::parse(cursor) {
+    if let Some(level) = usize::parse(cursor) {
+      if let Some(group) = usize::parse(cursor) {
         return Some(TItem::Ref{group, level});
       }
     }
@@ -177,19 +284,15 @@ pub struct Env {
 pub trait Num<T: BaseLike>: Sized {
   // None means finish
   fn parse(cursor: &mut RopeCursor<T>) -> Option<Self>;
-  fn parse_internal(cursor: &mut RopeCursor<T>, acc: u32) -> Option<Self>;
 }
 pub trait Bases<T: BaseLike>: Sized {
   fn parse(cursor: &mut RopeCursor<T>) -> Self;
 }
 
-impl<T: BaseLike> Num<T> for u32 {
+impl<T: BaseLike> Num<T> for usize {
   fn parse(cursor: &mut RopeCursor<T>) -> Option<Self> {
-    return Self::parse_internal(cursor, 0);
-  }
-  fn parse_internal(cursor: &mut RopeCursor<T>, acc: u32) -> Option<Self> {
-    let mut v: u32 = 0;
-    let mut mask: u32 = 1;
+    let mut v: usize = 0;
+    let mut mask: usize = 1;
     while let Some(base) = cursor.next() {
       match base.to_base() {
         Base::C => { v |= mask; }
@@ -234,6 +337,30 @@ pub trait State<T: BaseLike> {
   }
 }
 
+pub struct DnaState<T: BaseLike> {
+  finished: bool,
+  rna: Vec<[T;7]>,
+}
+
+impl<T: BaseLike> DnaState<T> {
+  pub fn new() -> Self {
+    DnaState{finished: false, rna: Vec::new()}
+  }
+}
+
+impl<T: BaseLike> State<T> for DnaState<T> {
+  fn rna(&mut self, c: &mut RopeCursor<T>) {
+    let i = c.pos() + 3;
+    c.skip(10);
+    if c.at_end() { return; }
+    self.rna.push([c.at(i), c.at(i + 1), c.at(i + 2), c.at(i + 3),
+                   c.at(i + 4), c.at(i + 5), c.at(i + 6)]);
+  }
+  fn finish(&mut self) {
+    self.finished = true;
+  }
+}
+
 pub trait Pattern<T: BaseLike>: Sized {
   fn exec<S: BaseLike>(&self, cursor: &mut RopeCursor<S>, env: &mut Env) -> bool;
   fn make_bases(cursor: &mut RopeCursor<T>) -> Self;
@@ -241,10 +368,8 @@ pub trait Pattern<T: BaseLike>: Sized {
   fn make_search(cursor: &mut RopeCursor<T>) -> Self;
   fn make_open(cursor: &mut RopeCursor<T>) -> Self;
   fn make_close(cursor: &mut RopeCursor<T>) -> Self;
-  fn parse<S: State<T>>(cursor: &mut RopeCursor<T>, depth: &mut usize,
+  fn parse_item<S: State<T>>(cursor: &mut RopeCursor<T>, depth: &mut usize,
                         state: &mut S) -> Option<Self> {
-    let pos = cursor.pos();
-    let i = cursor.peek();
     let next = next_op(cursor);
     match next {
       OpCode::Invalid => { state.finish(); None }
@@ -272,9 +397,19 @@ pub trait Pattern<T: BaseLike>: Sized {
       }
       OpCode::III => {
         state.rna(cursor);
-        Self::parse(cursor, depth, state)
+        Self::parse_item(cursor, depth, state)
       }
     }
+  }
+
+  fn parse<S: State<T>>(cursor: &mut RopeCursor<T>,
+                        state: &mut S) -> Vec<Self> {
+    let mut v: Vec<Self> = Vec::new();
+    let mut depth: usize = 0;
+    while let Some(item) = Self::parse_item(cursor, &mut depth, state) {
+      v.push(item);
+    }
+    v
   }
 }
 
@@ -293,10 +428,8 @@ pub trait Template<T: BaseLike>: Sized {
   fn make_len(cursor: &mut RopeCursor<T>) -> Option<Self>;
   fn make_ref(cursor: &mut RopeCursor<T>) -> Option<Self>;
 
-  fn parse<S: State<T>>(cursor: &mut RopeCursor<T>,
-                        state: &mut S) -> Option<Self> {
-    let pos = cursor.pos();
-    let i = cursor.peek();
+  fn parse_item<S: State<T>>(cursor: &mut RopeCursor<T>,
+                             state: &mut S) -> Option<Self> {
     let next = next_op(cursor);
     match next {
       OpCode::Invalid => { state.finish(); None }
@@ -315,7 +448,61 @@ pub trait Template<T: BaseLike>: Sized {
       }
       OpCode::III => {
         state.rna(cursor);
-        Self::parse(cursor, state)
+        Self::parse_item(cursor, state)
+      }
+    }
+  }
+
+  fn parse<S: State<T>>(cursor: &mut RopeCursor<T>,
+                        state: &mut S) -> Vec<Self> {
+    let mut v: Vec<Self> = Vec::new();
+    while let Some(item) = Self::parse_item(cursor, state) {
+      v.push(item);
+    }
+    v
+  }
+}
+
+
+fn match_replace<T: BaseLike>(dna: &mut Rope<T>, pat: &[PItem<T>],
+                              tpl: &[TItem<T>], start: usize) {
+  let mut cursor = dna.cursor();
+  cursor.seek(start);
+  let mut env = Env{starts: vec![], groups: vec![]};
+  for p in pat {
+    if !p.exec(&mut cursor, &mut env) {
+      dna.splice(0, start, None);
+      return;
+    }
+  }
+  // Matched - figure out where to splice...
+  // Go thru template and find ordered unescaped groups
+  //  - if any overlap, they'll be in order:
+  //      ( !5 ( !5 ) ) => $0 $1
+  //    then $0 = 5..10, $1 = 0..10, so keep $1 as splice
+
+  // TODO - factor out a find_splice_points() function here so we can
+  // test it separately!
+
+  let mut splice_points: Vec<(usize, usize)> = vec![];
+  for (i, t) in tpl.iter().enumerate() {
+    if let Some(cur) = t.as_unprotected_group() {
+      let mut cur = cur as isize;
+      // is this a valid splice point? i.e. does it overlap with previous end?
+      if (cur as usize) < env.groups.len() {
+        let g1 = env.groups[cur as usize];
+        while let Some(last) = splice_points.pop() {
+          let g0 = env.groups[last.1];
+          if g0.1 <= g1.0 || g0.1 - g0.0 > g1.1 - g1.0 {
+            // If there's no overlap or the existing one is bigger, put it back
+            splice_points.push(last);
+            cur = -1;
+            break;
+          }
+        }
+        if cur >= 0 {
+          splice_points.push((i, cur as usize));
+        }
       }
     }
   }
@@ -394,21 +581,22 @@ fn build_offset_table<T: BaseLike>(needle: &[T]) -> Vec<usize> {
 mod dna_tests {
   use super::*;
   use quickcheck_macros::quickcheck;
-  use base::{Base, SourceBase, from_str};
+  use base::{Base, SourceBase};
 
   #[test]
   fn find_simple() {
-    let mut haystack = from_str("ICFPIICFCPFIICICFC").collect::<Rope<SourceBase>>().cursor();
-    let needle = from_str("IIC").collect::<Vec<SourceBase>>();
-    assert_eq!(find(&haystack, &needle, 0), Some(4));
-    assert_eq!(find(&haystack, &needle, 1), Some(4));
-    assert_eq!(find(&haystack, &needle, 3), Some(4));
-    assert_eq!(find(&haystack, &needle, 4), Some(4));
-    assert_eq!(find(&haystack, &needle, 5), Some(11));
-    assert_eq!(find(&haystack, &needle, 8), Some(11));
-    assert_eq!(find(&haystack, &needle, 11), Some(11));
-    assert_eq!(find(&haystack, &needle, 12), None);
-    assert_eq!(find(&haystack, &needle, 14), None);
+    let dna = SourceBase::collect::<Rope<_>>("ICFPIICFCPFIICICFC");
+    let mut haystack = dna.cursor();
+    let needle = SourceBase::collect::<Vec<_>>("IIC");
+    assert_eq!(find(&mut haystack, &needle, 0), Some(4));
+    assert_eq!(find(&mut haystack, &needle, 1), Some(4));
+    assert_eq!(find(&mut haystack, &needle, 3), Some(4));
+    assert_eq!(find(&mut haystack, &needle, 4), Some(4));
+    assert_eq!(find(&mut haystack, &needle, 5), Some(11));
+    assert_eq!(find(&mut haystack, &needle, 8), Some(11));
+    assert_eq!(find(&mut haystack, &needle, 11), Some(11));
+    assert_eq!(find(&mut haystack, &needle, 12), None);
+    assert_eq!(find(&mut haystack, &needle, 14), None);
   }
 
   #[quickcheck]
@@ -425,9 +613,36 @@ mod dna_tests {
     let haystack_str =
         haystack.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join("");
     let needle_str = &haystack_str[start .. start + len];
-    let needle = from_str(needle_str).collect::<Vec<Base>>();
+    let needle = Base::collect::<Vec<_>>(needle_str);
     let expected = haystack_str[i..].find(needle_str).map(|j| i + j);
-    assert_eq!(find(&haystack, &needle, i), expected);
+    assert_eq!(find(&mut haystack.cursor(), &needle, i), expected);
   }
 
+  #[test]
+  fn parse_pattern1() {
+    let dna = SourceBase::collect::<Rope<_>>("CIIC");
+    let mut state = DnaState::<SourceBase>::new();
+    let mut c = dna.cursor();
+    let pat = PItem::parse(&mut c, &mut state);
+    assert_eq!(pat,
+               vec![PItem::Bases(vec![
+                 SourceBase::from_parts(Base::I, 0, -1)])]);
+    assert_eq!(c.pos(), c.full_len());
+    assert_eq!(state.finished, false);
+    assert_eq!(state.rna, Vec::<[SourceBase;7]>::new());
+  }
+
+  #[test]
+  fn parse_pattern2() {
+    let dna = Base::collect::<Rope<_>>("IIPIPICPIICICIIF");
+    let mut state = DnaState::<Base>::new();
+    let mut c = dna.cursor();
+    let pat = PItem::parse(&mut c, &mut state);
+    assert_eq!(pat,
+               "( !2 ) P".split(' ').map(|s| s.parse::<PItem<Base>>().unwrap())
+                   .collect::<Vec<_>>());
+    assert_eq!(c.pos(), c.full_len());
+    assert_eq!(state.finished, false);
+    assert_eq!(state.rna, Vec::<[Base;7]>::new());
+  }
 }

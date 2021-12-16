@@ -242,6 +242,11 @@ impl<'a, T: Copy> RopeCursor<'a, T> {
   }
 
   #[inline]
+  pub fn root(&self) -> &'a Rope<T> {
+    self.root
+  }
+
+  #[inline]
   pub fn full_len(&self) -> usize {
     self.root.len()
   }

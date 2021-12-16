@@ -3,7 +3,7 @@ use std::fmt;
 use std::mem;
 use std::marker::PhantomData;
 
-pub trait BaseLike: Copy + PartialEq {
+pub trait BaseLike: Copy + PartialEq + fmt::Display {
   fn to_base(self) -> Base;
   fn to_u2(self) -> u8 { self.to_base() as u8 }
   fn from_base(base: Base) -> Self;
@@ -23,6 +23,14 @@ pub trait BaseLike: Copy + PartialEq {
   fn unprotect(self) -> Self {
     // NOTE: for IC -> P, unprotect the I, not the C.
     BaseLike::from_base(Base::from_u8(self.to_base() as u8 + 3))
+  }
+  fn slice_to_string(v: &[Self]) -> String {
+    v.iter().map(|x| x.to_base().char()).collect()
+  }
+
+  fn collect<C: FromIterator<Self>>(s: &str) -> C {
+    BaseLikeIterator{s: s.as_bytes(), i: 0, pos: 0, phantom: PhantomData}
+        .collect::<C>()
   }
 }
 
@@ -165,8 +173,17 @@ impl<'a, T: BaseLike> Iterator for BaseLikeIterator<'a, T> {
 }
 
 
-pub fn from_str<'a, T: BaseLike>(s: &'a str) -> BaseLikeIterator<'a, T> {
-  BaseLikeIterator{s: s.as_bytes(), i: 0, pos: 0, phantom: PhantomData}
+// TODO - this belongs in a util module.
+pub struct Join<'a, T>(pub &'a [T], pub &'a str);
+impl<'a, T: fmt::Display> fmt::Display for Join<'a, T> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    if self.0.len() == 0 { return Ok(()); }
+    write!(f, "{}", self.0[0])?;
+    for i in 1 .. self.0.len() {
+      write!(f, "{}{}", self.1, self.0[i])?;
+    }
+    Ok(())
+  }
 }
 
 
@@ -202,14 +219,14 @@ mod base_tests {
   #[test]
   fn from_str_base() {
     let s = "ICFPIIC";
-    let v: Vec<Base> = from_str(s).collect::<Vec<Base>>();
+    let v: Vec<Base> = Base::collect(s);
     assert_eq!(v, vec![Base::I, Base::C, Base::F, Base::P, Base::I, Base::I, Base::C]);
   }
 
   #[test]
   fn from_str_sourcebase() {
     let s = "ICFPIIC";
-    let v: Vec<SourceBase> = from_str(s).collect::<Vec<SourceBase>>();
+    let v: Vec<SourceBase> = SourceBase::collect(s);
     assert_eq!(v, vec![
       SourceBase(0 << 2 | 0), SourceBase(1 << 2 | 1),
       SourceBase(2 << 2 | 2), SourceBase(3 << 2 | 3),
