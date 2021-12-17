@@ -203,8 +203,7 @@ impl<T: BaseLike> Template<T> for TItem<T> {
       }
       TItem::Ref{group, level} => {
         if *group < env.len() {
-          let i = env[*group].0;
-          while i < env[*group].1 {
+          for i in env[*group].0 .. env[*group].1 {
             cursor.at(i).protect(*level as u8, out);
           }
         }
@@ -478,7 +477,7 @@ pub trait Template<T: BaseLike>: Sized {
 }
 
 
-fn iterate<B: BaseLike, S: State<B>>(dna: &mut Rope<B>, state: &mut S) {
+pub fn iterate<B: BaseLike, S: State<B>>(dna: &mut Rope<B>, state: &mut S) {
   // TODO - find a way to parametrize on Pattern and Template.
 println!("Iterate: {}", str(&dna));
   let mut cursor = dna.cursor();
@@ -546,7 +545,8 @@ println!("No match: splicing to {}", str(&dna));
       }
       (r, v)
     }).collect::<Vec<_>>();
-println!("Splices: {:?}", splices);
+// TODO - still need to verify that this is correct
+//println!("Splices: {:?}", splices);
   for ((start, end), bases) in splices {
     let insert = if bases.len() > 0 { Some(bases) } else { None };
     dna.splice(*start, end - start, insert);
@@ -740,13 +740,13 @@ mod dna_tests {
     assert_eq!(&str(&dna), "PICFC");
   }
 
-  // #[test]
-  // fn full_iteration_2() {
-  //   let mut dna = Base::collect::<Rope<_>>("IIPIPICPIICICIIFICCIFCCCPPIICCFPC");
-  //   let mut state = DnaState::new();
-  //   iterate(&mut dna, &mut state);
-  //   assert_eq!(&str(&dna), "PIICCFCFFPC");
-  // }
+  #[test]
+  fn full_iteration_2() {
+    let mut dna = Base::collect::<Rope<_>>("IIPIPICPIICICIIFICCIFCCCPPIICCFPC");
+    let mut state = DnaState::new();
+    iterate(&mut dna, &mut state);
+    assert_eq!(&str(&dna), "PIICCFCFFPC");
+  }
 
   #[test]
   fn full_iteration_3() {

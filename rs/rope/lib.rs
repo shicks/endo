@@ -1,5 +1,7 @@
 const THRESHOLD: usize = 500;
 
+use std::cmp;
+
 #[derive(Clone, Debug)]
 pub struct Rope<T: Copy>(Option<Box<Node<T>>>);
 
@@ -17,7 +19,7 @@ struct App<T: Copy> {
   left: Rope<T>,
   right: Rope<T>,
   length: usize,
-  //depth: i8,
+  depth: i8,
 }
 
 // NOTE: Not using the derived equals because we want to make a custom
@@ -66,6 +68,7 @@ impl<T: Copy> Rope<T> {
   ////////////////////////////////////////////////////////////////
   // Accessors
 
+  #[inline]
   pub fn len(&self) -> usize {
     match self.0.as_deref() {
       None => 0,
@@ -74,11 +77,21 @@ impl<T: Copy> Rope<T> {
     }
   }
 
+  #[inline]
+  pub fn dep(&self) -> i8 {
+    match self.0.as_deref() {
+      None|Some(Node::Leaf(_)) => 0 as i8,
+      Some(Node::App(App{depth, ..})) => *depth,
+    }
+  }
+
+  #[inline]
   pub fn cursor<'a>(&'a self) -> RopeCursor<'a, T> {
     RopeCursor::new(self)
   }
 
   // Alternative name, for convention
+  #[inline]
   pub fn iter<'a>(&'a self) -> RopeCursor<'a, T> {
     RopeCursor::new(self)
   }
@@ -94,9 +107,9 @@ impl<T: Copy> Rope<T> {
       return;
     }
     let length = self.len() + right.len();
-    //let depth = cmp::max(self.dep(), right.dep()) + 1; // unneeded?
+    let depth = cmp::max(self.dep(), right.dep()) + 1; // unneeded?
     let left = self.0.take();
-    let out = Some(Box::new(Node::App(App{left: Rope(left), right, length})));
+    let out = Some(Box::new(Node::App(App{left: Rope(left), right, length, depth})));
     self.0 = out;
     self.rebalance();
   }
@@ -129,7 +142,8 @@ impl<T: Copy> Rope<T> {
         self.0 = insert.map(|v| Box::new(Node::Leaf(v)));
       }
       Some(Node::App(App{ref mut left, ref mut right,
-                         length: ref mut app_len, ..})) => {
+                         length: ref mut app_len,
+                         depth: ref mut dep})) => {
         let left_len = left.len();
         if start >= left_len {
           // Only need to touch right child
@@ -144,6 +158,7 @@ impl<T: Copy> Rope<T> {
           right.splice_internal(0, end - left_len, delta - left_delta, insert);
         }
         *app_len = (*app_len as isize + delta) as usize;
+        *dep = cmp::max(left.dep(), right.dep()) + 1;
         self.rebalance();
       }
       Some(Node::Leaf(ref mut arr)) => {
@@ -173,7 +188,7 @@ impl<T: Copy> Rope<T> {
             arr.truncate(start);
             let left = Rope(self.0.take());
             self.0 = Some(Box::new(Node::App(App{
-              left, right, /*depth: 1,*/ length: new_len})));
+              left, right, depth: 1, length: new_len})));
           }
         } else if start == 0 {
           // Replace prefix
@@ -182,14 +197,14 @@ impl<T: Copy> Rope<T> {
           arr.splice(start..end, [].into_iter());
           let right = Rope(self.0.take());
           self.0 = Some(Box::new(Node::App(App{
-            left, right, /*depth: 1,*/ length: new_len})));
+            left, right, depth: 1, length: new_len})));
         } else if insert.is_none() {
           // No insert: connect outer parts via an App
           let right = Rope(Some(Box::new(Node::Leaf(Vec::from(&arr[end..])))));
           arr.truncate(start);
           let left = Rope(self.0.take());
           self.0 = Some(Box::new(Node::App(App{
-            left, right, /*depth: 1,*/ length: new_len})));
+            left, right, depth: 1, length: new_len})));
         } else {
           // Three-segment join: attach the middle to the shorter end?
           let middle = Rope(Some(Box::new(Node::Leaf(insert.unwrap()))));
@@ -201,15 +216,15 @@ impl<T: Copy> Rope<T> {
           let right_len = right.len();
           if left_len < right_len {
             left = Rope(Some(Box::new(Node::App(App{
-              length: left_len + middle.len(), //depth: 1,
+              length: left_len + middle.len(), depth: 1,
               left, right: middle}))));
           } else {
             right = Rope(Some(Box::new(Node::App(App{
-              length: right_len + middle.len(), //depth: 1,
+              length: right_len + middle.len(), depth: 1,
               left: middle, right}))));
           }
           self.0 = Some(Box::new(Node::App(App{
-            left, right, length: new_len, /*depth: 2*/})));
+            left, right, length: new_len, depth: 2})));
         }
       }
     }
@@ -218,8 +233,107 @@ impl<T: Copy> Rope<T> {
   ////////////////////////////////////////////////////////////////
   // Internal
 
+  #[inline]
+  fn balance_factor(&self) -> i8 {
+    match self.0.as_deref() {
+      None|Some(Node::Leaf(_)) => 0,
+      Some(Node::App(App{left, right, ..})) => left.dep() - right.dep(),
+    }
+  }
+
+  fn check_invariants(&self) {
+    match self.0.as_deref() {
+      None|Some(Node::Leaf(_)) => {},
+      Some(Node::App(App{left, right, length, depth})) => {
+        if *length != left.len() + right.len() {
+          panic!("Bad length {} from left {} and right {}",
+                 length, left.len(), right.len());
+        } else if *depth != cmp::max(left.dep(), right.dep()) + 1 {
+          panic!("Bad depth {} from left {} and right {}",
+                 depth, left.dep(), right.dep());
+        } else if depth - left.dep() > 2 {
+          panic!("Unbalanced small left child {} vs right {}",
+                 left.dep(), right.dep());
+        } else if depth - right.dep() > 2 {
+          panic!("Unbalanced small right child {} vs left {}",
+                 right.dep(), left.dep());
+        }        
+      }
+    }
+  }
+
   fn rebalance(&mut self) {
-    // TODO - write me!
+    // Assumption: left and right branches are individually balanced,
+    // but the balance factor of self may be way off.
+    if self.len() < THRESHOLD {
+      if let Some(Node::App(_)) = self.0.as_deref() {
+        let leaf = self.iter().collect::<Vec<_>>();
+        self.0 = Some(Box::new(Node::Leaf(leaf)));
+      }
+      return;
+    }
+
+    loop {
+      let bf = self.balance_factor();
+      if bf > 1 {
+        // left is taller
+        let (mut l, r) = self.take_children();
+        let (ll, mut lr) = l.take_children();
+        if lr.dep() > ll.dep() {
+          // middle is taller: split up LR and pivot it to R
+          let (lrl, lrr) = lr.take_children();
+          lr.set_children(lrr, r);
+          lr.rebalance(); // right could be _way_ shorter
+          l.set_children(ll, lrl); // don't need to rebalance if l was balanced
+          self.set_children(l, lr);          
+        } else {
+          // middle not taller: simple 3-way rotate right, pivot L to R
+          l.set_children(lr, r);
+          l.rebalance();
+          self.set_children(ll, l);
+        }
+      } else if bf < -1 {
+        // right is taller
+        let (l, mut r) = self.take_children();
+        let (mut rl, rr) = r.take_children();
+        if rl.dep() > rr.dep() {
+          // middle is taller: split up RL and pivot it to L
+          let (rll, rlr) = rl.take_children();
+          rl.set_children(l, rll);
+          rl.rebalance(); // left could be _way_ shorter
+          r.set_children(rlr, rr); // don't need to rebalance if r was balanced
+          self.set_children(rl, r);          
+        } else {
+          // middle not taller: simple 3-way rotate right, pivot L to R
+          r.set_children(l, rl);
+          r.rebalance();
+          self.set_children(r, rr);
+        }
+      } else {
+        break;
+      }
+    }
+  }
+
+  #[inline]
+  fn set_children(&mut self, left: Self, right: Self) {
+    if let Some(Node::App(a)) = self.0.as_deref_mut() {
+      a.length = left.len() + right.len();
+      a.depth = cmp::max(left.dep(), right.dep()) + 1;
+      a.left = left;
+      a.right = right;
+    } else {
+      panic!("set_children on a leaf");
+    }
+  }
+
+  #[inline]
+  fn take_children(&mut self) -> (Self, Self) {
+    if let Some(Node::App(App{left, right, ..})) = self.0.as_deref_mut() {
+      (Rope(left.0.take()), Rope(right.0.take()))
+    } else {
+      panic!("take_children on a leaf")
+    }
   }
 }
 
@@ -392,34 +506,73 @@ mod rope_tests {
   }
 
   #[test]
-  fn append_rope() {
+  fn append_rope_short() {
+    // NOTE: We need large leafs to avoid the consolidation threshold
     let s1 = &[2, 5, 4, 1, 6];
     let s2 = &[3, 7, 9, 8, 0];
     let mut left = Rope::from_slice(s1);
     let right = Rope::from_slice(s2);
     left.append_rope(right);
-    assert_rope_eq!(left,
-                    app!{left: leaf(s1), right: leaf(s2), length: 10});
+    let mut out = s1.iter().map(|x| *x).collect::<Vec<_>>();
+    out.extend_from_slice(s2);
+    assert_rope_eq!(left, leaf(&out));
   }
 
   #[test]
-  fn append_slice() {
+  fn append_rope() {
+    // NOTE: We need large leafs to avoid the consolidation threshold
+    let s1 = &[2, 5, 4, 1, 6].iter().cycle().take(300).collect::<Vec<_>>();
+    let s2 = &[3, 7, 9, 8, 0].iter().cycle().take(300).collect::<Vec<_>>();
+    let mut left = Rope::from_slice(s1);
+    let right = Rope::from_slice(s2);
+    left.append_rope(right);
+    assert_rope_eq!(left,
+                    app!{left: leaf(s1), right: leaf(s2),
+                         length: 600, depth: 1});
+  }
+
+  #[test]
+  fn append_slice_short() {
     let s1 = &[2, 5, 4, 1, 6];
     let s2 = &[3, 7, 9, 8, 0];
     let mut rope = Rope::from_slice(s1);
     rope.append_slice(s2);
-    assert_rope_eq!(rope,
-                    app!{left: leaf(s1), right: leaf(s2), length: 10});
+    let mut out = s1.iter().map(|x| *x).collect::<Vec<_>>();
+    out.extend_from_slice(s2);
+    assert_rope_eq!(rope, leaf(&out));
   }
 
   #[test]
-  fn prepend_slice() {
+  fn append_slice() {
+    let s1 = &[2, 5, 4, 1, 6].iter().cycle().take(300).collect::<Vec<_>>();
+    let s2 = &[3, 7, 9, 8, 0].iter().cycle().take(300).collect::<Vec<_>>();
+    let mut rope = Rope::from_slice(s1);
+    rope.append_slice(s2);
+    assert_rope_eq!(rope,
+                    app!{left: leaf(s1), right: leaf(s2),
+                         length: 600, depth: 1});
+  }
+
+  #[test]
+  fn prepend_slice_short() {
     let s1 = &[2, 5, 4, 1, 6];
     let s2 = &[3, 7, 9, 8, 0];
     let mut rope = Rope::from_slice(s1);
     rope.prepend_slice(s2);
+    let mut out = s2.iter().map(|x| *x).collect::<Vec<_>>();
+    out.extend_from_slice(s1);
+    assert_rope_eq!(rope, leaf(&out));
+  }
+
+  #[test]
+  fn prepend_slice() {
+    let s1 = &[2, 5, 4, 1, 6].iter().cycle().take(300).collect::<Vec<_>>();
+    let s2 = &[3, 7, 9, 8, 0].iter().cycle().take(300).collect::<Vec<_>>();
+    let mut rope = Rope::from_slice(s1);
+    rope.prepend_slice(s2);
     assert_rope_eq!(rope,
-                    app!{left: leaf(s2), right: leaf(s1), length: 10});
+                    app!{left: leaf(s2), right: leaf(s1),
+                         length: 600, depth: 1});
   }
 
   #[test]
@@ -450,6 +603,7 @@ mod rope_tests {
   #[quickcheck]
   fn iterator_parity(xs: Vec<u32>) {
     let rope = xs.iter().cloned().collect::<Rope<_>>();
+    rope.check_invariants();
     assert_equal(rope.iter(), xs.iter().map(|x| *x))
   }
 
@@ -461,6 +615,7 @@ mod rope_tests {
     for op in ops {
       op.apply(&mut i, &mut v, &mut r);
       assert_equal(r.iter(), v.iter().map(|x| *x));
+      r.check_invariants();
     }
   }
 
