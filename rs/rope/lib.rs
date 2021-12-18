@@ -1,4 +1,4 @@
-const THRESHOLD: usize = 500;
+const THRESHOLD: usize = 5;
 
 use std::cmp;
 

@@ -16,6 +16,8 @@ path = "./bin.rs"
 [dependencies]
 rope = {path = "../rope"}
 base = {path = "../base"}
+lazy_static = "1.2.0"
+flate2 = "1.0"
 
 [dev-dependencies]
 quickcheck = "1"

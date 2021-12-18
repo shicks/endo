@@ -78,6 +78,20 @@ interface Template<T> {
   index: number;
 }
 
+let crcTable!: number[];
+function ensureCrcTable() {
+  if (crcTable) return;
+  let c: number;
+  crcTable = [];
+  for (let n = 0; n < 256; n++) {
+    c = n;
+    for (let k = 0; k < 8; k++) {
+      c = ((c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1));
+    }
+    crcTable[n] = c;
+  }
+}
+
 const ESCAPES: number[][] = [[0], [1], [2], [3], [0, 1]];
 export abstract class AbstractDna<T> {
   saveOp = false;
@@ -88,6 +102,15 @@ export abstract class AbstractDna<T> {
   abstract isRope(arg: unknown): arg is Rope<T>;
   abstract rope(iterable: Iterable<T>): Rope<T>; // should short-circuit
   abstract init(str: string): Rope<T>;
+
+  crc(it: Iterable<T>): number {
+    ensureCrcTable();
+    let crc = 0 ^ (-1);
+    for (let i of it) {
+      crc = (crc >>> 8) ^ crcTable[(crc ^ this.base(i)) & 0xff];
+    }
+    return (crc ^ (-1)) >>> 0;
+  }
 
   join(left: Rope<T>, right: Rope<T>): Rope<T> {
     return right.splice(0, 0, left);
@@ -127,7 +150,11 @@ export abstract class AbstractDna<T> {
   }
 
   iterate(dna: Rope<T>): DnaResult<T> {
-    log(() => `\nIteration ${++ITERATION} (len=${dna.length})`);
+    log(() => `\nIteration ${++ITERATION} (len=${dna.length}) CRC ${this.crc(dna).toString(16)}`);
+// let str='';
+// let i=0;
+// for(const b of dna) { str += 'ICFP'[this.base(b)]; if (++i == 320) break; }
+// console.log(str);
     const rna: Emit<T>[] = [];
     const pat = this.pattern(dna, rna, 0);
     if (pat.index < 0) return {rna, finish: true};
