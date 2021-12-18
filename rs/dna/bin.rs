@@ -1,3 +1,4 @@
+
 use dna::{DnaState, State, crc, iterate};
 use rope::Rope;
 use base::{Base, BaseLike, Join};
@@ -17,7 +18,7 @@ fn main() {
   let mut i = 0;
   while !state.finished() {
     i += 1;
-    // if i % 5000 == 0 {
+    // if i % 50000 == 0 {
     //   println!("Iteration {}: {} bases, depth {}", i, dna.len(), dna.dep());
     // }
 //println!("{}", Join(&dna.iter().take(320).collect::<Vec<_>>(), ""));

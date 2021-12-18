@@ -1,5 +1,3 @@
-const THRESHOLD: usize = 5;
-
 use std::cmp;
 
 #[derive(Clone, Debug)]
@@ -164,56 +162,30 @@ impl<T: Copy> Rope<T> {
       Some(Node::Leaf(ref mut arr)) => {
         let arr_len = arr.len();
         let new_len = ((arr_len as isize) + delta) as usize;
-        let trivial_shrink
-            = insert.is_none() && (start == 0 || end == arr_len);
-        if new_len < THRESHOLD || trivial_shrink {
-          // Splice directly into array
-          match insert {
-            // TODO - use raw vec parts when trivial shrink
-            None => { arr.splice(start..end, [].into_iter()); }
-            Some(v) => { arr.splice(start..end, v.into_iter()); }
-          };
-          // NOTE: there's a minor optimization we could do here:
-          // When start == 0 we can splice arr onto v instead.
-        } else if end == arr_len {
-          if start == 0 {
-            // Replace entire leaf
-            match insert {
-              Some(v) => { *arr = v; }
-              None => { self.0 = None; }
-            }
-          } else {
-            // Replace suffix
-            let right = Rope(Some(Box::new(Node::Leaf(insert.unwrap()))));
-            arr.truncate(start);
-            let left = Rope(self.0.take());
-            self.0 = Some(Box::new(Node::App(App{
-              left, right, depth: 1, length: new_len})));
-          }
-        } else if start == 0 {
-          // Replace prefix
-          let left = Rope(Some(Box::new(Node::Leaf(insert.unwrap()))));
-          // TODO - use raw pieces to do this in O(1) with no copy
-          arr.splice(start..end, [].into_iter());
-          let right = Rope(self.0.take());
-          self.0 = Some(Box::new(Node::App(App{
-            left, right, depth: 1, length: new_len})));
-        } else if insert.is_none() {
-          // No insert: connect outer parts via an App
-          let right = Rope(Some(Box::new(Node::Leaf(Vec::from(&arr[end..])))));
+        let mut left: Rope<T> = Rope(None);
+        let mut right: Rope<T> = Rope(None);
+        let mut middle: Rope<T> = Rope(None);
+//   let insert_len = insert.as_ref().map(|x| x.len());
+        if end < arr_len {
+          right = Rope(Some(Box::new(Node::Leaf(arr.split_off(end)))));
+          // assert_eq!(arr.len(), end);
+          // assert_eq!(right.len(), arr_len - end);
+        }
+        if start > 0 {
           arr.truncate(start);
-          let left = Rope(self.0.take());
-          self.0 = Some(Box::new(Node::App(App{
-            left, right, depth: 1, length: new_len})));
-        } else {
-          // Three-segment join: attach the middle to the shorter end?
-          let middle = Rope(Some(Box::new(Node::Leaf(insert.unwrap()))));
-          // TODO - use raw vec to extract this as its own value
-          let mut right = Rope(Some(Box::new(Node::Leaf(Vec::from(&arr[end..])))));
-          arr.truncate(start);
-          let mut left = Rope(self.0.take());
+          left = Rope(self.0.take());
+        }
+        if let Some(v) = insert {
+          middle = Rope(Some(Box::new(Node::Leaf(v))));
+        }
+        if right.len() == 0 {
+          right = middle;
+        } else if left.len() == 0 {
+          left = middle;
+        } else if middle.len() > 0 {
           let left_len = left.len();
           let right_len = right.len();
+// println!("3-way join: {}, {}, {}", left_len, middle.len(), right_len);
           if left_len < right_len {
             left = Rope(Some(Box::new(Node::App(App{
               length: left_len + middle.len(), depth: 1,
@@ -223,8 +195,22 @@ impl<T: Copy> Rope<T> {
               length: right_len + middle.len(), depth: 1,
               left: middle, right}))));
           }
+        }
+        // At this point, middle is empty (and probably moved)
+        // All that's left to do is combine left and right, if
+        // both are present.
+        let left_len = left.len();
+        if left_len == 0 || right.len() == 0 {
+          self.0 = if left_len > 0 { left.0 } else { right.0 };
+        } else {
+          let depth = cmp::max(left.dep(), right.dep()) + 1;
+          // if new_len != left.len() + right.len() {
+          //   println!("arr_len = {}, delta = {}, new_len = {}, insert = {:?}, start = {}, end = {}",
+          //            arr_len, delta, new_len, insert_len, start, end);
+          // }
+          // assert_eq!(new_len, left.len() + right.len());
           self.0 = Some(Box::new(Node::App(App{
-            left, right, length: new_len, depth: 2})));
+              left, right, length: new_len, depth})));
         }
       }
     }
@@ -265,14 +251,6 @@ impl<T: Copy> Rope<T> {
   fn rebalance(&mut self) {
     // Assumption: left and right branches are individually balanced,
     // but the balance factor of self may be way off.
-    if self.len() < THRESHOLD {
-      if let Some(Node::App(_)) = self.0.as_deref() {
-        let leaf = self.iter().collect::<Vec<_>>();
-        self.0 = Some(Box::new(Node::Leaf(leaf)));
-      }
-      return;
-    }
-
     loop {
       let bf = self.balance_factor();
       if bf > 1 {
@@ -336,6 +314,20 @@ impl<T: Copy> Rope<T> {
     }
   }
 }
+
+
+// fn splice_suffix<T>(arr: &mut Vec<T>, mid: usize) -> Vec<T> {
+//   unsafe {
+//     // let mut copy: Vec<T> = &mut *arr;
+//     // let (ptr, len, cap) = copy.into_raw_parts();
+//     let len = arr.len();
+//     let cap = arr.capacity();
+//     let ptr = arr.as_mut_ptr();
+//     let right = Vec::from_raw_parts(ptr.add(mid), len - mid, cap - mid);
+//     *arr = Vec::from_raw_parts(ptr, mid, mid);
+//     right
+//   }
+// }
 
 
 ////////////////////////////////////////////////////////////////
