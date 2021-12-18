@@ -12,15 +12,19 @@ export class PngRnaCanvas extends AbstractRnaCanvas {
       if (!this.snapshots) return;
       if (this.bitmaps.length > 1 && !this.snapshotOverlays) return;
       filename = `${this.snapshotDir}/${String(i++).padStart(5, '0')}${
-          this.bitmaps.length > 1 ? `_${this.bitmaps.length - 1}` : ''}.png`;
+          //this.bitmaps.length > 1 ? `_${this.bitmaps.length - 1}` :
+          ''}.png`;
     }
-    const data = new Uint8Array(W * H * 4);
+    const data = new Uint8Array(W * H * 4 * this.bitmaps.length);
     const view = new DataView(data.buffer);
-    const bitmap = this.bitmaps[this.bitmaps.length - 1].data;
-    for (let i = 0; i < SIZE; i++) {
-      view.setUint32(i << 2, bitmap[i], false);
+    for (let j = 0; j < this.bitmaps.length; j++) {
+      const bitmap = this.bitmaps[j].data;
+      const start = SIZE * j << 2;
+      for (let i = 0; i < SIZE; i++) {
+        view.setUint32(start + (i << 2), bitmap[i], false);
+      }
     }
-    output({data, width: W, height: H}, filename);
+    output({data, width: W, height: H * this.bitmaps.length}, filename);
     console.error(`Wrote ${filename}`);
   }
 }

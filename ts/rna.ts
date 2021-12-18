@@ -45,12 +45,13 @@ function pixel(bucket: Bucket): Pixel {
     if (i & 2) g += 255 * v;
     if (i & 4) b += 255 * v;
   }
-  r = (r / n) | 0;
-  g = (g / n) | 0;
-  b = (b / n) | 0;
   const o = bucket[Alpha.Opaque];
   const na = o + bucket[Alpha.Transparent];
   const a = na ? (255 * o / na) | 0 : 255;
+  r = (r * a / n / 255) | 0;
+  g = (g * a / n / 255) | 0;
+  b = (b * a / n / 255) | 0;
+// if (!n || !na) console.error(`default color (${n}, ${na}): rgba(${(((r << 24) | (g << 16) | (b << 8) | a) >>> 0).toString(16)})`);
   return ((r << 24) | (g << 16) | (b << 8) | a) >>> 0;
 }
 
@@ -62,6 +63,12 @@ export class Bitmap {
 
   setPixel(pos: Pos, pixel: Pixel) {
     this.data[pos] = pixel;
+  }
+
+  finalize() {
+    for (let i = 0; i < SIZE; i++) {
+      this.data[i] |= 0xff;
+    }
   }
 
   line(p0: Pos, p1: Pos, pixel: Pixel) {
@@ -121,10 +128,10 @@ export class Bitmap {
       const b1 = (p1 >>> 8) & 255;
       const a0 = p0 & 255;
       const a1 = p1 & 255;
-      const r = Math.min(255, r0 + (r1 * (255 - a0) / 255 | 0));
-      const g = Math.min(255, g0 + (g1 * (255 - a0) / 255 | 0));
-      const b = Math.min(255, b0 + (b1 * (255 - a0) / 255 | 0));
-      const a = Math.min(255, a0 + (a1 * (255 - a0) / 255 | 0));
+      const r = Math.min(255, r0 + r1 * (255 - a0) / 255 | 0);
+      const g = Math.min(255, g0 + g1 * (255 - a0) / 255 | 0);
+      const b = Math.min(255, b0 + b1 * (255 - a0) / 255 | 0);
+      const a = Math.min(255, a0 + a1 * (255 - a0) / 255 | 0);
       data[pos] = r << 24 | g << 16 | b << 8 | a;
     }
     return new Bitmap(data);
@@ -183,8 +190,8 @@ export abstract class AbstractRnaCanvas {
       case 'PFFICCP':
         this.line();
         if (++this.lines == 25) {
-          this.lines = 0;
-          this.snapshot();
+          //this.lines = 0;
+          //this.snapshot();
         }
         break;
       case 'PIIPIIP':
@@ -256,15 +263,19 @@ export abstract class AbstractRnaCanvas {
   tryFill() {
     //return;
     if (this.pixel == null) this.pixel = pixel(this.bucket);
+    //console.error(`Filling rgba(${this.pixel.toString(16).padStart(8, '0')}) at ${Math.floor(this.pos / W)},${this.pos % W}`);
     this.bitmaps[this.bitmaps.length - 1].tryFill(this.pos, this.pixel);
   }
   addBitmap() {
     //return;
+    if (this.bitmaps.length >= 10) return;
+    //console.error(`Adding bitmap ${this.bitmaps.length + 1}`);
     this.bitmaps.push(new Bitmap());
   }
   compose() {
     //return;
     if (this.bitmaps.length < 2) return;
+    //console.error(`Composing`);
     const top = this.bitmaps.pop()!;
     const bottom = this.bitmaps.pop()!;
     this.bitmaps.push(bottom.compose(top));
@@ -272,8 +283,12 @@ export abstract class AbstractRnaCanvas {
   clip() {
     //return;
     if (this.bitmaps.length < 2) return;
+    //console.error(`Clipping`);
     const top = this.bitmaps.pop()!;
     const bottom = this.bitmaps.pop()!;
     this.bitmaps.push(bottom.clip(top));
+  }
+  finalize() {
+    this.bitmaps[0].finalize();
   }
 }

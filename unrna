@@ -1,0 +1,136 @@
+#!/usr/bin/perl
+
+my $summarize = 1;
+my $skip_junk = 1;
+
+my %names = (
+  PIPIIIC => 'color black',
+  PIPIIIP => 'color red',
+  PIPIICC => 'color green',
+  PIPIICF => 'color yellow',
+  PIPIICP => 'color blue',
+  PIPIIFC => 'color magenta',
+  PIPIIFF => 'color cyan',
+  PIPIIPC => 'color white',
+  PIPIIPF => 'color transparent',
+  PIPIIPP => 'color opaque',
+  PIIPICP => 'color empty',
+  PIIIIIP => 'move',
+  PCCCCCP => 'ccw',
+  PFFFFFP => 'cw',
+  PCCIFFP => 'mark',
+  PFFICCP => 'line',
+  PIIPIIP => 'fill',
+  PCCPFFP => 'add bitmap',
+  PFFPCCP => 'compose',
+  PFFICCF => 'clip',
+);
+my $x = 0;
+my $y = 0;
+my $mx = 0;
+my $my = 0;
+my $dir = 0;
+my $n = 0;
+my @cos = (1, 0, -1, 0);
+my @sin = (0, -1, 0, 1);
+my @bucket = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+sub pixel {
+  my $n = 0;
+  my $r = 0;
+  my $g = 0;
+  my $b = 0;
+  for (my $i = 0; $i < 8; $i++) {
+    my $v = $bucket[$i];
+    $n += $v;
+    $r += $v if $i & 1;
+    $g += $v if $i & 2;
+    $b += $v if $i & 4;
+  }
+  $r = $n ? int(255 * $r / $n) : 0;
+  $g = $n ? int(255 * $g / $n) : 0;
+  $b = $n ? int(255 * $b / $n) : 0;
+  my $o = $bucket[9];
+  my $na = $o + $bucket[8];
+  my $a = $na ? int(255 * $o / $na) : 255;
+  return sprintf('%02x%02x%02x%02x', $r, $g, $b, $a);
+}
+
+my $line = -1;
+while ($_ = <>) {
+  $line++;
+  chomp $_;
+  s/[ICFP]{7}/$names{$&} || $&/eg;
+  next if $skip_junk and /^[ICFP]{7}$/;
+  #next if $skip_color and /^color/;
+  if ($summarize) {
+    if (/move/) {
+      $x = ($x + $cos[$dir]) % 600;
+      $y = ($y + $sin[$dir]) % 600;
+      next;
+    } elsif (/^cw/) {
+      $dir = ($dir + 3) % 4;
+      next;
+    } elsif (/ccw/) {
+      $dir = ($dir + 1) % 4;
+      next;
+    } elsif (/black/) {
+      $bucket[0]++;
+      next;
+    } elsif (/red/) {
+      $bucket[1]++;
+      next;
+    } elsif (/green/) {
+      $bucket[2]++;
+      next;
+    } elsif (/yellow/) {
+      $bucket[3]++;
+      next;
+    } elsif (/blue/) {
+      $bucket[4]++;
+      next;
+    } elsif (/magenta/) {
+      $bucket[5]++;
+      next;
+    } elsif (/cyan/) {
+      $bucket[6]++;
+      next;
+    } elsif (/white/) {
+      $bucket[7]++;
+      next;
+    } elsif (/transparent/) {
+      $bucket[8]++;
+      next;
+    } elsif (/opaque/) {
+      $bucket[9]++;
+      next;
+    } elsif (/empty/) {
+      @bucket = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+      next;
+    } elsif (/mark/) {
+      $mx = $x;
+      $my = $y;
+      next;
+    } elsif (/add bitmap/) {
+      $n = $n + 1 unless $n == 9;
+    } elsif (/line/) {
+      my $p = pixel();
+      $_ = "line:$n #$p ($x,$y)-($mx,$my)";
+    } elsif (/fill/) {
+      my $p = pixel();
+      $_ = "fill:$n #$p";
+    } elsif (/compose/) {
+      next unless $n;
+      my $m = $n;
+      $n -= 1;
+      $_ = "compose:$m->$n";
+    } elsif (/clip/) {
+      next unless $n;
+      my $m = $n;
+      $n -= 1;
+      $_ = "clip:$m->$n";
+    }
+  }
+
+  printf "\%08d \%s\n", $line, $_;
+}

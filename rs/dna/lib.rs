@@ -357,20 +357,29 @@ pub trait State<T: BaseLike> {
 }
 
 pub struct DnaState<T: BaseLike> {
+  pub print: bool,
   finished: bool,
   rna: Vec<Rna<T>>,
 }
 
 impl<T: BaseLike> State<T> for DnaState<T> {
   fn new() -> Self {
-    DnaState{finished: false, rna: Vec::new()}
+    DnaState{finished: false, rna: Vec::new(), print: false}
   }
   fn emit(&mut self, c: &mut RopeCursor<T>) {
     let i = c.pos() + 3;
     c.skip(10);
     if c.at_end() { return; }
-    self.rna.push([c.at(i), c.at(i + 1), c.at(i + 2), c.at(i + 3),
-                   c.at(i + 4), c.at(i + 5), c.at(i + 6)]);
+    let rna = [c.at(i), c.at(i + 1), c.at(i + 2), c.at(i + 3),
+               c.at(i + 4), c.at(i + 5), c.at(i + 6)];
+    self.rna.push(rna);
+    if self.print {
+      println!("{}{}{}{}{}{}{}",
+               rna[0].to_base().char(), rna[1].to_base().char(),
+               rna[2].to_base().char(), rna[3].to_base().char(),
+               rna[4].to_base().char(), rna[5].to_base().char(),
+               rna[6].to_base().char());
+    }
   }
   fn finish(&mut self) {
     self.finished = true;
@@ -487,14 +496,14 @@ pub trait Template<T: BaseLike>: Sized {
 
 pub fn iterate<B: BaseLike, S: State<B>>(dna: &mut Rope<B>, state: &mut S) {
   // TODO - find a way to parametrize on Pattern and Template.
-//println!("Iterate: {}", str(&dna));
+//eprintln!("Iterate: {}", str(&dna));
   let mut cursor = dna.cursor();
   let pat = PItem::parse(&mut cursor, state);
   if state.finished() { return; }
-//println!("Pat: {}", Join(&pat, " "));
+//eprintln!("Pat: {}", Join(&pat, " "));
   let tpl = TItem::parse(&mut cursor, state);
   if state.finished() { return; }
-//println!("Tpl: {}", Join(&tpl, " "));
+//eprintln!("Tpl: {}", Join(&tpl, " "));
   let start = cursor.pos();
   match_replace(dna, &pat, &tpl, start);
 }
@@ -507,12 +516,12 @@ fn match_replace<T: BaseLike>(dna: &mut Rope<T>, pat: &[PItem<T>],
   for p in pat {
     if !p.exec(&mut cursor, &mut env) {
       dna.splice(0, start, None);
-//println!("No match: splicing to {}", str(&dna));
-//println!("No match: splicing {}", start);
+//eprintln!("No match: splicing to {}", str(&dna));
+//eprintln!("No match: splicing {}", start);
       return;
     }
   }
-//println!("Matched {} bases", cursor.pos() - start);
+//eprintln!("Matched {} bases", cursor.pos() - start);
   // Matched - figure out where to splice...
   // Go thru template and find ordered unescaped groups
   //  - if any overlap, they'll be in order:
@@ -556,7 +565,7 @@ fn match_replace<T: BaseLike>(dna: &mut Rope<T>, pat: &[PItem<T>],
       (r, v)
     }).collect::<Vec<_>>();
 // TODO - still need to verify that this is correct
-//println!("Splices: {:?}", splices);
+//eprintln!("Splices: {:?}", splices);
   for ((start, end), bases) in splices {
     let insert = if bases.len() > 0 { Some(bases) } else { None };
     dna.splice(*start, end - start, insert);
@@ -568,7 +577,7 @@ type Rng = (usize, usize);
 fn find_splice<'a, T: BaseLike>(tpl: &'a [TItem<T>], env: &[Rng], range: Rng)
                                 -> Vec<(Rng, &'a [TItem<T>])> {
 
-//println!("find_splice: {:?} {:?}", range, env);
+//eprintln!("find_splice: {:?} {:?}", range, env);
 
   let unprotected: Vec<(usize, Rng)> =
     tpl.iter().enumerate().filter_map(|(i, x)| {
@@ -581,26 +590,26 @@ fn find_splice<'a, T: BaseLike>(tpl: &'a [TItem<T>], env: &[Rng], range: Rng)
       })
     }).collect();
   
-//println!("unprotected: {:?}", unprotected);
+//eprintln!("unprotected: {:?}", unprotected);
 
 // TODO - this is a mess - pull out a struct+method?
   fn internal<'a, T: BaseLike>(rest: &[(usize, Rng)], range: Rng,
               tpl_r: (usize, usize), tpl: &'a [TItem<T>], out: &mut Vec<(Rng, &'a [TItem<T>])>) {
 
     // find the max in rest
-//println!("  internal: {:?} {:?} {:?}", range, rest, tpl_r);
+//eprintln!("  internal: {:?} {:?} {:?}", range, rest, tpl_r);
     let rest: Vec<(usize, Rng)> =
         rest.iter().filter(|(_, r)| r.0 >= range.0 && r.1 <= range.1)
         .map(|x| *x).collect();
     let option_i = rest.iter().enumerate().max_by_key(|(_, (_, r))| r.1 - r.0);
 
     if let Some((i1, (i2, r))) = option_i {
-//println!("   => split {} {} {:?}", i1, i2, r);
+//eprintln!("   => split {} {} {:?}", i1, i2, r);
       // split at i
       internal(&rest[i1 + 1 ..], (r.1, range.1), (i2 + 1, tpl_r.1), tpl, out);
       internal(&rest[.. i1], (range.0, r.0), (tpl_r.0, *i2), tpl, out);
     } else {
-//println!("   => terminal");
+//eprintln!("   => terminal");
       out.push((range, &tpl[tpl_r.0 .. tpl_r.1]));
     }
   }
@@ -640,7 +649,7 @@ pub fn crc<T: BaseLike>(rope: &Rope<T>) -> u32 {
 
 
 fn find<T: BaseLike, S: BaseLike>(haystack: &mut RopeCursor<T>, needle: &[S], start: usize) -> Option<usize> {
-//println!("find {} from {}", Join(needle, ""), start);
+//eprintln!("find {} from {}", Join(needle, ""), start);
   let needle_len = needle.len();
   if needle_len == 0 { return Some(start); }
   let haystack_len = haystack.full_len();

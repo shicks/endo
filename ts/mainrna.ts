@@ -26,11 +26,16 @@ async function run() {
 
   const file = argv._[0] || '/dev/stdin';
   const canvas = new PngRnaCanvas();
+  if (argv.snapshot) canvas.snapshots = canvas.snapshotOverlays = true;
   const rnas = String(await fs.readFile(String(file))).split(/\n+/g);
+  let i = 0;
   for (const rna of rnas) {
+    i++;
     canvas.process(rna);
   }
+  canvas.finalize();
   canvas.snapshot(argv.out);
+  console.error(`Processed ${i} RNA`);
 }
 
 run().then();

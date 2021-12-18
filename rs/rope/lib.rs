@@ -185,7 +185,7 @@ impl<T: Copy> Rope<T> {
         } else if middle.len() > 0 {
           let left_len = left.len();
           let right_len = right.len();
-// println!("3-way join: {}, {}, {}", left_len, middle.len(), right_len);
+// eprintln!("3-way join: {}, {}, {}", left_len, middle.len(), right_len);
           if left_len < right_len {
             left = Rope(Some(Box::new(Node::App(App{
               length: left_len + middle.len(), depth: 1,
@@ -205,7 +205,7 @@ impl<T: Copy> Rope<T> {
         } else {
           let depth = cmp::max(left.dep(), right.dep()) + 1;
           // if new_len != left.len() + right.len() {
-          //   println!("arr_len = {}, delta = {}, new_len = {}, insert = {:?}, start = {}, end = {}",
+          //   eprintln!("arr_len = {}, delta = {}, new_len = {}, insert = {:?}, start = {}, end = {}",
           //            arr_len, delta, new_len, insert_len, start, end);
           // }
           // assert_eq!(new_len, left.len() + right.len());
