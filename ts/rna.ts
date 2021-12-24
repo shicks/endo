@@ -160,6 +160,8 @@ export class Bitmap {
 
 export abstract class AbstractRnaCanvas {
   lines: number = 0;
+  count: number = 0;
+  lineSnapshot: number = Infinity; // change this to snapshot every N lines
   bitmaps: Bitmap[] = [new Bitmap()];
   bucket: Bucket = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   pixel: Pixel|undefined = 255;
@@ -168,9 +170,10 @@ export abstract class AbstractRnaCanvas {
   dir: Dir = Dir.E;
 
   //abstract render(data: Uint32Array): void;
-  abstract snapshot(): void;
+  abstract snapshot(opts?: {filename?: string, suffix?: string}): void;
 
   process(rna: string) {
+    this.count++;
     switch (rna) {
       case 'PIPIIIC': this.addColor(Rgb.Black); break;
       case 'PIPIIIP': this.addColor(Rgb.Red); break;
@@ -189,13 +192,13 @@ export abstract class AbstractRnaCanvas {
       case 'PCCIFFP': this.setMark(); break;
       case 'PFFICCP':
         this.line();
-        if (++this.lines == 25) {
-          //this.lines = 0;
-          //this.snapshot();
+        if (++this.lines == this.lineSnapshot) {
+          this.lines = 0;
+          this.snapshot();
         }
         break;
       case 'PIIPIIP':
-        this.maybeSnapshot();
+        this.maybeSnapshot('pre');
         this.tryFill();
         this.snapshot();
         break;
@@ -204,12 +207,12 @@ export abstract class AbstractRnaCanvas {
         this.addBitmap();
         break;
       case 'PFFPCCP':
-        this.maybeSnapshot();
+        this.maybeSnapshot('pre');
         this.compose();
         this.snapshot();
         break;
       case 'PFFICCF':
-        this.maybeSnapshot();
+        this.maybeSnapshot('pre');
         this.clip();
         this.snapshot();
         break;
@@ -221,8 +224,8 @@ export abstract class AbstractRnaCanvas {
     this.maybeSnapshot();
   }
 
-  maybeSnapshot() {
-    if (this.lines > 0) this.snapshot();
+  maybeSnapshot(suffix?: string) {
+    if (this.lines > 0) this.snapshot({suffix});
     this.lines = 0;
   }
 

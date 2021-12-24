@@ -4,6 +4,8 @@ use std::mem;
 use std::marker::PhantomData;
 
 pub trait BaseLike: Copy + PartialEq + fmt::Display + fmt::Debug {
+  const HAS_SOURCE: bool = false;
+
   fn to_base(self) -> Base;
   fn to_u2(self) -> u8 { self.to_base() as u8 }
   fn from_base(base: Base) -> Self;
@@ -11,6 +13,13 @@ pub trait BaseLike: Copy + PartialEq + fmt::Display + fmt::Debug {
   fn protect(self, level: u8, out: &mut Vec<Self>) {
     BaseLike::push(self.to_base() as u8 + level, out);
   }
+
+  fn addr(self) -> Option<u32> { None }
+  fn level(self) -> Option<i8> { None }
+  fn from_parts(base: Base, _addr: u32, _level: i8) -> Self {
+    Self::from_base(base)
+  }
+
   // TODO - how to make this private?
   fn push(i: u8, out: &mut Vec<Self>) {
     if i < 4 {
@@ -24,7 +33,7 @@ pub trait BaseLike: Copy + PartialEq + fmt::Display + fmt::Debug {
     // NOTE: for IC -> P, unprotect the I, not the C.
     BaseLike::from_base(Base::from_u8(self.to_base() as u8 + 3))
   }
-  fn collect<C: FromIterator<Self>>(s: &str) -> C {
+  fn collect_from<C: FromIterator<Self>>(s: &str) -> C {
     BaseLikeIterator{s: s.as_bytes(), i: 0, pos: 0, phantom: PhantomData}
         .collect::<C>()
   }
@@ -74,23 +83,9 @@ impl BaseLike for Base {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceBase(u32);
 
-impl SourceBase {
-  pub fn addr(self) -> u32 {
-    (self.0 & ADDR_MASK) >> 2
-  }
-
-  pub fn level(self) -> i8 {
-    ((self.0 as i32) >> 26) as i8
-  }
-
-  pub fn from_parts(base: Base, addr: u32, level: i8) -> Self {
-    SourceBase(base as u8 as u32
-               | (addr << 2) & ADDR_MASK
-               | ((level as i32) << 26) as u32)
-  }
-}
-
 impl BaseLike for SourceBase {
+  const HAS_SOURCE: bool = true;
+
   #[inline]
   fn to_base(self) -> Base { Base::from_u8((self.0 & 3) as u8) }
   #[inline]
@@ -117,6 +112,20 @@ impl BaseLike for SourceBase {
     let mask = (esc << 26) as u32 | (self.0 & ADDR_MASK);
     let base = ((self.0 & 3) + 3) & 3;
     SourceBase(mask | base)
+  }
+  #[inline]
+  fn addr(self) -> Option<u32> {
+    Some((self.0 & ADDR_MASK) >> 2)
+  }
+  #[inline]
+  fn level(self) -> Option<i8> {
+    Some(((self.0 as i32) >> 26) as i8)
+  }
+  #[inline]
+  fn from_parts(base: Base, addr: u32, level: i8) -> Self {
+    SourceBase(base as u8 as u32
+               | (addr << 2) & ADDR_MASK
+               | ((level as i32) << 26) as u32)
   }
 }
 
@@ -215,14 +224,14 @@ mod base_tests {
   #[test]
   fn from_str_base() {
     let s = "ICFPIIC";
-    let v: Vec<Base> = Base::collect(s);
+    let v: Vec<Base> = Base::collect_from(s);
     assert_eq!(v, vec![Base::I, Base::C, Base::F, Base::P, Base::I, Base::I, Base::C]);
   }
 
   #[test]
   fn from_str_sourcebase() {
     let s = "ICFPIIC";
-    let v: Vec<SourceBase> = SourceBase::collect(s);
+    let v: Vec<SourceBase> = SourceBase::collect_from(s);
     assert_eq!(v, vec![
       SourceBase(0 << 2 | 0), SourceBase(1 << 2 | 1),
       SourceBase(2 << 2 | 2), SourceBase(3 << 2 | 3),
@@ -289,23 +298,24 @@ mod base_tests {
 
   #[test]
   fn sourcebase_addr() {
-    assert_eq!(SourceBase(0x123456 << 2).addr(), 0x123456);
+    assert_eq!(SourceBase(0x123456 << 2).addr(), Some(0x123456));
   }
 
   #[test]
   fn sourcebase_level() {
-    assert_eq!(SourceBase((15 << 26) | 0x123456 << 2).level(), 15);
-    assert_eq!(SourceBase((-15 << 26) as u32 | 0x123456 << 2).level(), -15);
-    assert_eq!(SourceBase((31 << 26) | 0x123456 << 2).level(), 31);
-    assert_eq!(SourceBase((-31 << 26) as u32 | 0x123456 << 2).level(), -31);
-    assert_eq!(SourceBase((-32 << 26) as u32 | 0x123456 << 2).level(), -32);
+    assert_eq!(SourceBase((15 << 26) | 0x123456 << 2).level(), Some(15));
+    assert_eq!(SourceBase((-15 << 26) as u32 | 0x123456 << 2).level(), Some(-15));
+    assert_eq!(SourceBase((31 << 26) | 0x123456 << 2).level(), Some(31));
+    assert_eq!(SourceBase((-31 << 26) as u32 | 0x123456 << 2).level(), Some(-31));
+    assert_eq!(SourceBase((-32 << 26) as u32 | 0x123456 << 2).level(), Some(-32));
   }
 
   #[quickcheck]
   fn sourcebase_from_parts(x: u32) {
     let orig = SourceBase(x);
     let rebuilt
-        = SourceBase::from_parts(orig.to_base(), orig.addr(), orig.level());
+        = SourceBase::from_parts(orig.to_base(),
+                                 orig.addr().unwrap(), orig.level().unwrap());
     assert_eq!(rebuilt, orig);
   }
 
@@ -326,9 +336,10 @@ mod base_tests {
   fn protect_sourcebase_roundtrip(x: u32, mut i: u8) {
     i &= 63;
     let orig = SourceBase(x);
+    let orig_level: i8 = orig.level().unwrap();
     let protected = protect(orig, i);
-    let escaped_level = cmp::min(orig.level() + i as i8, 31);
-    let expected_level = match (orig.level(), escaped_level) {
+    let escaped_level = cmp::min(orig_level + i as i8, 31);
+    let expected_level = match (orig_level, escaped_level) {
       (-32, _) => -32,
       (-31, _) => -31,
       (_, 31) => 31,
@@ -340,7 +351,8 @@ mod base_tests {
       unprotected = unprotect(&unprotected);
     }
     let expected_base
-        = SourceBase::from_parts(orig.to_base(), orig.addr(), expected_level);
+        = SourceBase::from_parts(orig.to_base(),
+                                 orig.addr().unwrap(), expected_level);
 
     assert_eq!(unprotected, vec![expected_base]);
   }

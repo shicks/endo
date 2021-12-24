@@ -1,19 +1,17 @@
 import {AbstractRnaCanvas, W, H, SIZE} from './rna.js';
 import output from 'image-output';
 
-let i = 1;
-
 export class PngRnaCanvas extends AbstractRnaCanvas {
   snapshots = false;
   snapshotOverlays = false;
   snapshotDir = 'snapshot';
-  override snapshot(filename?: string) {
+  override snapshot({filename = undefined, suffix = undefined}:
+                    {filename?: string, suffix?: string} = {}) {
     if (!filename) {
       if (!this.snapshots) return;
       if (this.bitmaps.length > 1 && !this.snapshotOverlays) return;
-      filename = `${this.snapshotDir}/${String(i++).padStart(5, '0')}${
-          //this.bitmaps.length > 1 ? `_${this.bitmaps.length - 1}` :
-          ''}.png`;
+      filename = `${this.snapshotDir}/${String(this.count++).padStart(7, '0')}${
+          suffix ? '_' + suffix : ''}.png`;
     }
     const data = new Uint8Array(W * H * 4 * this.bitmaps.length);
     const view = new DataView(data.buffer);

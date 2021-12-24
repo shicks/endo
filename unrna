@@ -60,6 +60,8 @@ my $line = -1;
 while ($_ = <>) {
   $line++;
   chomp $_;
+  s/(\s*#.*$)//;
+  my $comment = $1 || '';
   s/[ICFP]{7}/$names{$&} || $&/eg;
   next if $skip_junk and /^[ICFP]{7}$/;
   #next if $skip_color and /^color/;
@@ -132,5 +134,5 @@ while ($_ = <>) {
     }
   }
 
-  printf "\%08d \%s\n", $line, $_;
+  printf "\%08d \%s%s\n", $line, $_, $comment;
 }

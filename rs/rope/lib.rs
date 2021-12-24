@@ -227,7 +227,7 @@ impl<T: Copy> Rope<T> {
     }
   }
 
-  fn check_invariants(&self) {
+  pub fn check_invariants(&self) {
     match self.0.as_deref() {
       None|Some(Node::Leaf(_)) => {},
       Some(Node::App(App{left, right, length, depth})) => {
